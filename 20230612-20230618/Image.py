@@ -24,11 +24,15 @@ class Image():
         self._lattice_shape = lattice_shape
         self._img = np.random.normal(noise_mean, noise_spread, (width, height))
         
+    def pixel(self, px):
+        return int(px)
+    
+
     def add_photon(self, x, y):
         """ Add a photon to the pixel associated with the position (x, y). If the pixel corresponding to 
         the given position lies outside the image it is not included."""
         try:
-            self._img[int(np.rint(x)), int(np.rint(y))] += 1
+            self._img[self.pixel(x), self.pixel(y)] += 1
         except IndexError:
             pass
 
@@ -47,9 +51,9 @@ class Image():
         Each lattice site is populated with n_dark or n_bright photons on average if it is either unoccupied or occupied respectively."""
         site_positions = []
         for i in range(np.prod(self._lattice_shape)):
-            n0 = i // self._lattice_shape[0]
-            n1 = i - self._lattice_shape[0] * (i // self._lattice_shape[0])
-            site_positions.append(self._lattice_offset + np.array(n0 * self._a0 + n1 * self._a1))
+            row = i // self._lattice_shape[0]
+            col = i - self._lattice_shape[0] * (i // self._lattice_shape[0])
+            site_positions.append(self._lattice_offset + np.array(row * self._a0 + col * self._a1))
         site_positions = np.array(site_positions)
         for site_pos, site_occ in zip(site_positions, site_occupancies.flatten()):
             self.populate_site(site_pos[0], site_pos[1], n_dark + site_occ * n_bright, spread)
