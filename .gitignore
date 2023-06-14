@@ -1,0 +1,9 @@
+# ignore all files
+*
+!*/
+
+# unless they're python
+!*.py
+
+# or a jupyter notebook
+!*.ipynb
