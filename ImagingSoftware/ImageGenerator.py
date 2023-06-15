@@ -28,10 +28,10 @@ class Image():
         self.site_spread = site_spread
         self.n_tweezers = np.prod(lattice_shape)
         self.img = np.random.normal(
-            self.noise_mean, self.noise_spread, (self.width, self.height))
+        self.noise_mean, self.noise_spread, (self.width, self.height))
 
     def pixel(self, x):
-        return int(np.rint(x))
+        return x.astype(int)
 
     def add_photon(self, x, y):
         """ Add a photon to the pixel associated with the position (x, y). If the pixel corresponding to 
@@ -46,8 +46,8 @@ class Image():
         Poisson distribution with mean_photons as the average. The photon locations follow a Gaussian distribution
         with a standard deviation given by spread."""
         n_photons = np.random.poisson(self.n_dark + occupancy * self.n_bright)
-        photons_x, photons_y = np.random.normal(
-            x, self.site_spread, n_photons), np.random.normal(y, self.site_spread, n_photons)
+        photons_x = np.random.normal(x, self.site_spread, n_photons)
+        photons_y = np.random.normal(y, self.site_spread, n_photons)
         for x, y in zip(photons_x, photons_y):
             self.add_photon(x, y)
 
@@ -58,19 +58,18 @@ class Image():
         site_positions = []
         for i in range(self.n_tweezers):
             row = i // self.lattice_shape[0]
-            col = i - self.lattice_shape[0] * (i // self.lattice_shape[0])
+            col = np.mod(i, self.lattice_shape[0])
             site_positions.append(self.lattice_offset +
                                   np.array(row * self.a0 + col * self.a1))
         site_positions = np.array(site_positions)
         for site_pos, site_occ in zip(site_positions, site_occupancies.flatten()):
-            self.populate_site(site_pos[0], site_pos[1], site_occ)
+            self.populate_site(*site_pos, site_occ)
         return self.img
 
 class ImageGenerator():
     
     def __init__(self, width, height, a0, a1, lattice_offset, lattice_shape, noise_mean, noise_spread,
-                 n_dark, n_bright, site_spread):
-        
+                 n_dark, n_bright, site_spread):    
         self.width, self.height = width, height
         self.a0, self.a1 = a0, a1
         self.lattice_offset = lattice_offset
@@ -79,6 +78,8 @@ class ImageGenerator():
         self.n_dark, self.n_bright = n_dark, n_bright
         self.site_spread = site_spread
         self.n_tweezers = np.prod(lattice_shape)
+
+        self.images, self.occupancies = None, None
         
 
     def enumerate_occupancies(self):
@@ -99,8 +100,10 @@ class ImageGenerator():
     def make(self, n_reps):
         """ Create n_reps randomly generated images per possible occupancy configuration. """
         possible_occupancies = self.enumerate_occupancies()
-        occupancies, n_images = np.tile(possible_occupancies, (n_reps, 1)), n_reps * possible_occupancies.shape[0]
+        occupancies, n_images = np.repeat(possible_occupancies, n_reps, axis=0), n_reps * possible_occupancies.shape[0]
         images = [Image(self.width, self.height, self.a0, self.a1, self.lattice_offset, self.lattice_shape,
                          self.noise_mean, self.noise_spread, self.n_dark, self.n_bright, self.site_spread)
                            for x in range(n_images)]
-        return np.array([img.populate_image(occ) for img, occ in zip(images, occupancies)]), occupancies
+        self.images = np.array([img.populate_image(occ) for img, occ in zip(images, occupancies)])
+        self.occupancies = occupancies
+        return self.images, self.occupancies

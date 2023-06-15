@@ -9,16 +9,13 @@ from scipy.optimize import curve_fit
 
 class ImageProcessor():
 
-    def __init__(self, stack, lattice_shape, n_loops, model=None):
+    def __init__(self, stack, lattice_shape):
         self.stack = stack
         self.lattice_shape = lattice_shape
-        self.n_loops = n_loops
-        self.per_loop = self.stack.shape[0] // n_loops
         self.n_tweezers = np.prod(lattice_shape)
-        self.img_height, self.img_width = lattice_shape[0], lattice_shape[1]
+        self.img_height, self.img_width = stack.shape[1], stack.shape[2]
         self.a0, self.a1, self.lattice_offset = self.lattice_characteristics_rect()
         self.lattice_site_positions = self.lattice_site_positions()
-        self.model = model
 
     def pixel(self, x):
         """ Rounds scalar x to the nearest integer, corresponding to the nearest pixel."""
@@ -31,10 +28,64 @@ class ImageProcessor():
         # TODO: Make the gaussian no longer have to estimate standard deviation, offset and amplitude
         # rather use this information from what can be gathered about the lattice. Amplitude and standard deviation
         # can be gained from the averaged image but offset should probably come from background average.
-        guess = [self.stack.shape[1] / self.lattice_shape[0], 0, self.stack.shape[1] / self.lattice_shape[0], xdata.max() - xdata.min(), ydata.min()]
-        xparams, xerr = curve_fit(periodic_gaussian_1d(self.lattice_shape[0]), np.arange(len(xdata)), xdata, p0=guess)
-        yparams, yerr = curve_fit(periodic_gaussian_1d(self.lattice_shape[1]), np.arange(len(ydata)), ydata, p0=guess)
+        xparams, xcov = curve_fit(periodic_gaussian_1d(self.lattice_shape[0]), np.arange(len(xdata)), xdata,
+                                   p0=self.guess(xdata), bounds=(self.lower_bounds(xdata), self.upper_bounds(xdata)))
+        yparams, ycov = curve_fit(periodic_gaussian_1d(self.lattice_shape[1]), np.arange(len(ydata)), ydata,
+                                   p0=xparams, maxfev=int(1e4), bounds=(self.lower_bounds(ydata), self.upper_bounds(ydata)))
+        # The curve fitting works quite well for finding the lattice constant but not so mudch for the offset. 
+        # We try to shift the offset over in the x and y directions by one lattice constant at a time so
+        # long as the error keeps decreasing.
+        xerr, yerr = np.linalg.norm(np.diag(xcov)), np.linalg.norm(np.diag(ycov))
+        right, right_err = self.find_offset(xdata, xparams, 1, xerr)
+        left, left_err = self.find_offset(xdata, xparams, -1, xerr)
+        up, up_err = self.find_offset(ydata, yparams, 1, yerr)
+        down, down_err = self.find_offset(ydata, yparams, -1, yerr)
+        if right_err > left_err:
+            xparams = left
+        else:
+            xparams = right
+        if up_err > down_err:
+            yparams = down
+        else:
+            yparams = up
         return np.array([xparams[0], 0]), np.array([0, yparams[0]]), np.array([xparams[1], yparams[1]])
+    
+    def find_offset(self, data, guess, direction, min_err):
+        guess[1] += direction * guess[0]
+        params, cov = curve_fit(periodic_gaussian_1d(self.lattice_shape[0]), np.arange(len(data)), data,
+                                   p0=guess)
+        err = np.linalg.norm(np.diag(cov))
+        if err < min_err:
+            return self.find_offset(data, params, direction, err)
+        else:
+            guess[1] -= direction * guess[0]
+            return guess, min_err
+
+
+    def guess(self, data):
+        lattice_constant = 5.7
+        lattice_offset = 1
+        std = 1.2
+        scaling = data.max() - data.min()
+        offset = data.min()
+        return [lattice_constant, lattice_offset, std, scaling, offset]
+    
+    def lower_bounds(self, data):
+        lattice_constant = 2.4
+        lattice_offset = 0
+        std = 0
+        scaling = (data.max() - data.min()) / 4
+        offset = 0
+        return [lattice_constant, lattice_offset, std, scaling, offset]
+    
+    def upper_bounds(self, data):
+        lattice_constant = np.inf
+        lattice_offset = np.inf
+        std = self.img_width / (self.lattice_shape[0])
+        scaling = np.inf
+        offset = np.inf
+        return [lattice_constant, lattice_offset, std, scaling, offset]
+
 
     def lattice_site_positions(self):
         """ Returns an array of the positions of the lattice sites. """
@@ -66,34 +117,23 @@ class ImageProcessor():
         in the crops array that would be returned by process. """
         return tweezer * self.n_loops * self.per_loop + loop * self.per_loop + n
 
-    def crop_images(self):
+    def crop_images(self, n=3):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
             Images are labeled by [tweezer number, loop number, image number in loop]"""
-        crops = self.crop_sites(3)
-        labels = [np.array([i // (self.n_loops * self.per_loop),
-                             np.mod(i // self.per_loop, self.n_loops),
-                               np.mod(i, self.per_loop)]) for i in range(crops.shape[0])]
-        return crops, labels
+        crops = self.crop_sites(n)
+        return crops
     
-    def plot(self):
-        plt.imshow(self.stack.mean(axis=0), cmap='magma')
+    def plot(self, index=None):
+        if index == None:
+            img = self.stack.mean(axis=0)
+        else:
+            img = self.stack[index]
+        plt.imshow(img, cmap='magma')
         plt.colorbar()
         for position in self.lattice_site_positions:
-            plt.plot(*position, 'ws', alpha=0.5, fillstyle='none', markersize=10)
+            plt.plot(*position, 'bs', fillstyle='none')
         plt.show()
-    
-    def train(self):
-        """ Train the neural network for this image processing using the stack. """
-        return
-    
-    def evaluate(self):
-        return
-    
-    def training_data(self, n_images, m):
-        """ Create n_images of m x m groupings of lattice sites with the same background noise distribution, lattice constants,
-          point spread function, and average number of bright and dark pixels per lattice site as the collection of images processed."""
-        return
-    
+
     def mean_dark(self):
         return
     
@@ -108,9 +148,52 @@ class ImageProcessor():
         x_low, y_low = self.pixel(self.lattice_offset)
         x_high, y_high = self.pixel(lattice_region)
         avg[x_low: x_high, y_low: y_high] = np.full((x_high - x_low, y_high - y_low), np.NaN)
-        return np.nanmean(avg), np.nanstd(avg)
-
+        return np.nanmean(avg), np.nanstd(avg)   
     
+    def training_data(self, n_images, m):
+        """ Create n_images of m x m groupings of lattice sites with the same background noise distribution, lattice constants,
+          point spread function, and average number of bright and dark pixels per lattice site as the collection of images processed."""
+        return
+
+class GreenImageProcessor(ImageProcessor):
+
+    def __init__(self, stack, lattice_shape, n_loops):
+        super().__init__(stack, lattice_shape)
+        self.n_loops = n_loops
+        self.per_loop = self.stack.shape[0] // n_loops
+
+    def crop_index(self, tweezer, loop, n):
+        """ Given tweezer number, loop number, and image number (n), return the index that corresponds to the image
+        in the crops array that would be returned by process. """
+        return tweezer * self.n_loops * self.per_loop + loop * self.per_loop + n
+
+    def crop_images(self, n=3):
+        """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
+            Images are labeled by [tweezer number, loop number, image number in loop]"""
+        crops = self.crop_sites(n)
+        labels = [np.array([i // (self.n_loops * self.per_loop),
+                             np.mod(i // self.per_loop, self.n_loops),
+                               np.mod(i, self.per_loop)]) for i in range(crops.shape[0])]
+        return crops, labels
+    
+class BlueImageProcessor(ImageProcessor):
+
+    def __init__(self, stack, lattice_shape, labels):
+        super().__init__(stack, lattice_shape)
+        self.labels = labels
+        self.n_images = stack.shape[0]
+
+    def crop_index(self, tweezer, n):
+        """ Given tweezer number, loop number, and image number (n), return the index that corresponds to the image
+        in the crops array that would be returned by process. """
+        return tweezer * self.n_images + n
+
+    def crop_images(self, n=3):
+        """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
+            Images are labeled by [tweezer number, loop number, image number in loop. """
+        crops = self.crop_sites(n)
+        labels = np.transpose(np.tile(self.labels, self.n_images))
+        return crops, labels
 
 def periodic_gaussian_1d(n_sites):
     def helper(x, lattice_constant, lattice_offset, std, scaling, offset):
