@@ -38,6 +38,7 @@ class weighted_histogram_556:
         self.pixelWeight = None
         self.thresholds = None
         self.rAtom = rAtom
+        self.nTweezers = nTweezers
         if positions is not None:
             self.positions = positions
             self.nTweezers = len(positions)
