@@ -1,9 +1,14 @@
-# ignore all files
+# ignore all files in all directories
 *
 !*/
 
-# unless they're python
+# unless they're python,
 !*.py
 
-# or a jupyter notebook
+# a jupyter notebook
 !*.ipynb
+
+# a pipfile
+
+# or a markdown file
+!*.md

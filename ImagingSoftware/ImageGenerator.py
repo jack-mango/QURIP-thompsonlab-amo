@@ -31,6 +31,8 @@ class Image():
         self.noise_mean, self.noise_spread, (self.width, self.height))
 
     def pixel(self, x):
+        """ Rounds x down to the nearest integer, corresponding to the nearest pixel.
+          Note that x can be an array or a scalar. """
         return x.astype(int)
 
     def add_photon(self, x, y):
@@ -52,9 +54,11 @@ class Image():
             self.add_photon(x, y)
 
     def populate_image(self, site_occupancies):
-        """ Add photons to each lattice site given by occupancy. The occupancy variable should be an array with the same dimensions
-        as those given by the entries of lattice_shape with entries of either 0 or 1 corresponding to a filled or empty lattice site.
-        Each lattice site is populated with n_dark or n_bright photons on average if it is either unoccupied or occupied respectively."""
+        """ Add photons to each lattice site given by occupancy. The occupancy variable should be an
+          array with the same dimensions as those given by the entries of lattice_shape with entries
+          of either 0 or 1 corresponding to a filled or empty lattice site. Each lattice site is 
+          populated with n_dark or n_bright photons on average if it is either unoccupied or occupied
+          respectively."""
         site_positions = []
         for i in range(self.n_tweezers):
             row = i // self.lattice_shape[0]
@@ -69,7 +73,17 @@ class Image():
 class ImageGenerator():
     
     def __init__(self, width, height, a0, a1, lattice_offset, lattice_shape, noise_mean, noise_spread,
-                 n_dark, n_bright, site_spread):    
+                 n_dark, n_bright, site_spread): 
+        """
+        width : width of image in px
+        height : height of the image in px
+        a0, a1 : spacing between lattice site centers in px
+        lattice_offset : how much the first lattice site will be offset from (0, 0) in px
+        lattice_shape : the size of the lattice -- a 4x3 lattice would correspond to (4, 3)
+        noise_mean : the average background pixel value
+        noise_spread : the standard deviation in the background pixel value
+        #FIXME: Update
+        """   
         self.width, self.height = width, height
         self.a0, self.a1 = a0, a1
         self.lattice_offset = lattice_offset
@@ -83,7 +97,8 @@ class ImageGenerator():
         
 
     def enumerate_occupancies(self):
-        """ List all possible configurations of possible occupancies. """
+        """ List all configurations of possible occupancies. For a lattice with n_tweezers the number of,
+        occupancies is equal to the sum of the first n_tweezers binomial coefficients. """
         occupancies = []
         def helper(depth, occupancy):
             if depth == self.n_tweezers:
