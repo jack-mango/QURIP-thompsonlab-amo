@@ -85,7 +85,6 @@ class ImageGenerator():
     def enumerate_occupancies(self):
         """ List all possible configurations of possible occupancies. """
         occupancies = []
-
         def helper(depth, occupancy):
             if depth == self.n_tweezers:
                 occupancies.append(occupancy)
@@ -94,7 +93,7 @@ class ImageGenerator():
                 helper(depth + 1, empty)
                 helper(depth + 1, full)
             return
-        helper(0, np.empty(0))
+        helper(0, np.empty(0, dtype=int))
         return np.array(occupancies)
 
     def make(self, n_reps):

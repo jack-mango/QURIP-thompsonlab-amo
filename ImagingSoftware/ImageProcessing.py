@@ -61,7 +61,6 @@ class ImageProcessor():
             guess[1] -= direction * guess[0]
             return guess, min_err
 
-
     def guess(self, data):
         lattice_constant = 5.7
         lattice_offset = 1
@@ -112,12 +111,12 @@ class ImageProcessor():
             cropped_sites.append(self.crop(*position, h_border, v_border))
         return np.concatenate(tuple(cropped_sites))
     
-    def crop_index(self, tweezer, loop, n):
+    def dataset_index(self, tweezer, loop, n):
         """ Given tweezer number, loop number, and image number (n), return the index that corresponds to the image
         in the crops array that would be returned by process. """
         return tweezer * self.n_loops * self.per_loop + loop * self.per_loop + n
 
-    def crop_images(self, n=3):
+    def make_dataset(self, n=3):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
             Images are labeled by [tweezer number, loop number, image number in loop]"""
         crops = self.crop_sites(n)
@@ -162,12 +161,12 @@ class GreenImageProcessor(ImageProcessor):
         self.n_loops = n_loops
         self.per_loop = self.stack.shape[0] // n_loops
 
-    def crop_index(self, tweezer, loop, n):
+    def crop_index(self, tweezer_num, loop_num, img_num):
         """ Given tweezer number, loop number, and image number (n), return the index that corresponds to the image
         in the crops array that would be returned by process. """
-        return tweezer * self.n_loops * self.per_loop + loop * self.per_loop + n
+        return tweezer_num * self.n_loops * self.per_loop + loop_num * self.per_loop + img_num
 
-    def crop_images(self, n=3):
+    def make_dataset(self, n=3):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
             Images are labeled by [tweezer number, loop number, image number in loop]"""
         crops = self.crop_sites(n)
@@ -175,6 +174,36 @@ class GreenImageProcessor(ImageProcessor):
                              np.mod(i // self.per_loop, self.n_loops),
                                np.mod(i, self.per_loop)]) for i in range(crops.shape[0])]
         return crops, labels
+    
+    def make_labels(self, low, high):
+        crops = self.crop_sites(1)
+        crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
+        labels = np.empty(self.n_tweezers * self.n_loops * self.per_loop)
+        for tweezer_num, tweezer in enumerate(crops):
+            for loop_num, loop in enumerate(tweezer):
+                # NOTE: Might need to change this to a weighted Gaussian instead of pure mean.
+                avg = np.mean(loop, axis=(1, 2))
+                last_bright = np.where(avg > high)[0]
+                first_dark = np.where(avg < low)[0]
+                
+                first = self.crop_index(tweezer_num, loop_num, 0)
+                last = self.crop_index(tweezer_num, loop_num + 1, 0)
+                if last_bright.size == 0:
+                    last_bright = first
+                else:
+                    last_bright = self.crop_index(tweezer_num, loop_num, last_bright[-1] + 1)
+                if first_dark.size == 0:
+                    first_dark = last
+                else:
+                    first_dark = self.crop_index(tweezer_num, loop_num, first_dark[0])
+                if last_bright > first_dark:
+                    first_dark = last_bright
+                labels[first: last_bright] = np.ones(last_bright - first)
+                labels[last_bright: first_dark] = np.full(first_dark - last_bright, None)
+                labels[first_dark: last] = np.zeros(last - first_dark)
+        return labels
+                
+
     
 class BlueImageProcessor(ImageProcessor):
 
@@ -188,12 +217,18 @@ class BlueImageProcessor(ImageProcessor):
         in the crops array that would be returned by process. """
         return tweezer * self.n_images + n
 
-    def crop_images(self, n=3):
+    def make_dataset(self, n=3):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop they're in. 
-            Images are labeled by [tweezer number, loop number, image number in loop. """
+            Images are labeled by the centeral site occupancy. """
         crops = self.crop_sites(n)
-        labels = np.transpose(np.tile(self.labels, self.n_images))
+        labels = self.labels[:, self.n_tweezers // 3 + 1]
         return crops, labels
+    
+class TrainingImageProcessor(BlueImageProcessor):
+
+    def make_dataset(self, n=3):
+        return self.stack, self.labels[:, self.n_tweezers // n + 1]
+
 
 def periodic_gaussian_1d(n_sites):
     def helper(x, lattice_constant, lattice_offset, std, scaling, offset):
