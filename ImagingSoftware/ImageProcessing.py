@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
+from scipy.special import ndtri
 
 class ImageProcessor():
     """ 
@@ -22,9 +23,9 @@ class ImageProcessor():
         self.lattice_site_positions = self.lattice_site_positions()
 
     def pixel(self, x):
-        """ Rounds x down to the nearest integer, corresponding to the nearest pixel.
+        """ Rounds x to the nearest integer, corresponding to the nearest pixel.
           Note that x can be an array or a scalar. """
-        return x.astype(int)
+        return np.rint(x).astype(int)
     
     def lattice_characteristics_rect(self):
         """ Approximates the lattice constants a0 and a1, and lattice offset by fitting periodic Gaussians
@@ -123,7 +124,6 @@ class ImageProcessor():
         """ Given n, return an array containing a crop that includes n x n lattice sites centered on each site. """
         h_border, v_border = self.pixel(n * (self.a0 + self.a1) / 2)
         cropped_sites = []
-        print(n)
         for position in self.lattice_site_positions:
             cropped_sites.append(self.crop(*position, h_border, v_border))
         return np.concatenate(tuple(cropped_sites))
@@ -145,10 +145,10 @@ class ImageProcessor():
             img = self.stack.mean(axis=0)
         else:
             img = self.stack[index]
-        plt.imshow(img, cmap='magma')
+        plt.imshow(img, cmap='plasma')
         plt.colorbar()
         for position in self.lattice_site_positions:
-            plt.plot(*position, 'bs', fillstyle='none')
+            plt.plot(*position, 'ws', fillstyle='none', alpha=0.8)
         plt.show()
 
     def mean_dark(self):
@@ -189,29 +189,35 @@ class GreenImageProcessor(ImageProcessor):
         in the crops array that would be returned by make_dataset. """
         return tweezer_num * self.n_loops * self.per_loop + loop_num * self.per_loop + img_num
 
-    def make_dataset(self, lower, upper, n=3):
+    def make_dataset(self, n=3, keep_unknowns=False):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop
-          they're in. Images are labeled by occupancy of central site:
+          they're in. If keep_unknowns is set to False, then any crop with a label that correspondds to unknown is 
+           discarded from the dataset. Images are labeled by occupancy of central site:
             1 -> occupied
             0 -> unoccupied
             NaN -> unknown. """
         crops = self.crop_sites(n)
-        labels = self.make_labels(lower, upper)
-        return crops, labels
+        labels = self.make_labels()
+        if keep_unknowns:
+            return crops, labels
+        else:
+            mask = ~ np.isnan(labels)
+            return crops[mask], labels[mask] 
     
-    def make_labels(self, lower, upper):
+    def make_labels(self):
         """ Given an upper and lower threshold, classify whether lattice sites are occupied. You can read more about the
         algorithm used for classification in the documentation. """
         crops = self.crop_sites(1)
+        thresholds = self.find_thresholds(crops)
         crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
         labels = np.empty(self.n_tweezers * self.n_loops * self.per_loop)
+        print(thresholds)
         for tweezer_num, tweezer in enumerate(crops):
             for loop_num, loop in enumerate(tweezer):
                 # NOTE: Might need to change this to a weighted Gaussian instead of pure mean.
                 avg = np.mean(loop, axis=(1, 2))
-                last_bright = np.where(avg > upper)[0]
-                first_dark = np.where(avg < lower)[0]
-                
+                last_bright = np.where(avg > thresholds[tweezer_num][1])[0]
+                first_dark = np.where(avg < thresholds[tweezer_num][0])[0]         
                 first = self.crop_index(tweezer_num, loop_num, 0)
                 last = self.crop_index(tweezer_num, loop_num + 1, 0)
                 if last_bright.size == 0:
@@ -223,13 +229,74 @@ class GreenImageProcessor(ImageProcessor):
                 else:
                     first_dark = self.crop_index(tweezer_num, loop_num, first_dark[0])
                 if last_bright > first_dark:
+                    # First dark to last bright should be set to unknown
+                    # Problem is there are two (or more) times when we switch back and forth from bright to dark
                     first_dark = last_bright
                 labels[first: last_bright] = np.ones(last_bright - first)
                 labels[last_bright: first_dark] = np.full(first_dark - last_bright, None)
                 labels[first_dark: last] = np.zeros(last - first_dark)
         return labels
-                
+    
+    def find_thresholds(self, crops):
+        """ For each site in the lattice, find the pixel thresholds using find_site_threshold. """
+        thresholds = np.empty((self.n_tweezers, 2))
+        for i in range(self.n_tweezers):
+            thresholds[i] = self.find_site_threshold(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)])
+        return thresholds     
+        
+    def find_site_threshold(self, site_crops, t=2):
+        """ Find the pixel threshold such that the CDFs of two Gaussian distributions
+        fit to the bright and dark pixel intensity count distributions is less than 1e-6.
+        This corresponds to the above value of t for the standard gaussian distribution"""
+        avg = np.mean(site_crops, axis=(1, 2))
+        counts, bins = np.histogram(avg, bins=30)
+        centers = (bins[:-1] + bins[1:]) / 2
+        fit = self.fit_gaussians(centers, counts)
+        upper = fit[0] + fit[1] * t
+        lower = fit[2] - fit[3] * t
+        return np.array([lower, upper])
 
+    def fit_gaussians(self, x, y):
+        """ Try to fit two Gaussians to the data given in data. To do so first we try to fit the Gaussian to 
+        each peak separately, then try to do a fit of both together. If the data is found to only contain
+        one Gaussian, then the corresponding fit parameters are set to np.inf. """
+        bright_guess, dark_guess = self.double_gaussians_guess(x, y)
+        if bright_guess[0] == np.inf:
+            return dark_guess, bright_guess
+        else:
+            params, cov = curve_fit(double_gaussian, x, y, p0=[*dark_guess, *bright_guess])
+            return [*params[:2], *params[3:]]
+            
+        
+    def double_gaussians_guess(self, x, y):
+        """ Give a reasonable estimate for what the possible fit parameters could be for both Gaussians.
+        Returns two arrays where the first is a guess for the taller Gaussian and the second the shorter.
+        You can read the documentation for a detailed overview of how the algorithm works. """
+        first_peak = y.argmax()
+        intersection = self.n_consecutive_increases(y[first_peak:], 3)
+        # It's possible that no intersection is found
+        if intersection:
+            split = intersection + first_peak
+            x_dark, x_bright = x[:split], x[split:]
+            y_dark, y_bright = y[:split], y[split:]
+            dark_std_guess = fwhm(x_dark, y_dark) / (2 * np.sqrt(2 * np.log(2)))
+            bright_std_guess = fwhm(x_bright, y_bright) / (2 * np.sqrt(2 * np.log(2)))
+            dark_params, dark_cov = curve_fit(gaussian, x_dark, y_dark,
+                                               p0=[x_dark[y_dark.argmax()], dark_std_guess, y_dark.max()])
+            bright_params, bright_cov = curve_fit(gaussian, x_bright, y_bright,
+                                               p0=[x_bright[y_bright.argmax()], bright_std_guess, y_bright.max()])
+        else:
+            dark_params, dark_cov = curve_fit(gaussian, x, y)
+            bright_params = [np.inf for i in range(3)]
+        return dark_params, bright_params
+
+    def n_consecutive_increases(self, array, n):
+        """ Return the index of the first occurence of n consecutive increases if one exists. If none exist
+        then this method returns None."""
+        for i in range(array.size - n):
+            if all(array[i: i + n] == np.sort(array[i:i + n])) and np.size(np.unique(array[i: i + n])) == n:
+                return i
+        return
     
 class BlueImageProcessor(ImageProcessor):
 
@@ -280,3 +347,14 @@ def periodic_gaussian_2d(n_sites, std, scaling, offset):
     def helper(r, a0_x, a0_y, a1_x, a1_y, offset_x, offset_y):
         ans = 0
         #for i in range()
+
+def gaussian(x, mean, std, a):
+    return a * np.exp(- (x - mean) ** 2 / (2 * std ** 2))
+
+def double_gaussian(x, mean_1, std_1, a_1, mean_2, std_2, a_2):
+    return gaussian(x, mean_1, std_1, a_1) + gaussian(x, mean_2, std_2, a_2)
+
+def fwhm(x, y):
+    half_max = y.max() / 2
+    over_half_max = np.where(y > half_max)
+    return x[over_half_max[0][1]] - x[over_half_max[0][0]]
