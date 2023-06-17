@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.special import ndtri
 
+from AutoGauss import *
+
 class ImageProcessor():
     """ 
         A base class that can be used to process lattice images and determine occupancy.
@@ -211,7 +213,6 @@ class GreenImageProcessor(ImageProcessor):
         thresholds = self.find_thresholds(crops)
         crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
         labels = np.empty(self.n_tweezers * self.n_loops * self.per_loop)
-        print(thresholds)
         for tweezer_num, tweezer in enumerate(crops):
             for loop_num, loop in enumerate(tweezer):
                 # NOTE: Might need to change this to a weighted Gaussian instead of pure mean.
@@ -244,59 +245,20 @@ class GreenImageProcessor(ImageProcessor):
             thresholds[i] = self.find_site_threshold(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)])
         return thresholds     
         
-    def find_site_threshold(self, site_crops, t=2):
-        """ Find the pixel threshold such that the CDFs of two Gaussian distributions
-        fit to the bright and dark pixel intensity count distributions is less than 1e-6.
-        This corresponds to the above value of t for the standard gaussian distribution"""
+    def find_site_threshold(self, site_crops, z=2):
+        """ Find the pixel threshold of the possibly two Gaussian distributions in site_crops.
+        The thresholds are selected to be z standard deviations above or below the mean for the 
+        two distributions. """
         avg = np.mean(site_crops, axis=(1, 2))
         counts, bins = np.histogram(avg, bins=30)
         centers = (bins[:-1] + bins[1:]) / 2
-        fit = self.fit_gaussians(centers, counts)
-        upper = fit[0] + fit[1] * t
-        lower = fit[2] - fit[3] * t
+        fitting = AutoGauss(centers, counts)
+        dark_fit, bright_fit = fitting.fit_gaussians()
+        upper = bright_fit[0] + bright_fit[1] * z
+        lower = dark_fit[0] - dark_fit[1] * z
         return np.array([lower, upper])
 
-    def fit_gaussians(self, x, y):
-        """ Try to fit two Gaussians to the data given in data. To do so first we try to fit the Gaussian to 
-        each peak separately, then try to do a fit of both together. If the data is found to only contain
-        one Gaussian, then the corresponding fit parameters are set to np.inf. """
-        bright_guess, dark_guess = self.double_gaussians_guess(x, y)
-        if bright_guess[0] == np.inf:
-            return dark_guess, bright_guess
-        else:
-            params, cov = curve_fit(double_gaussian, x, y, p0=[*dark_guess, *bright_guess])
-            return [*params[:2], *params[3:]]
-            
-        
-    def double_gaussians_guess(self, x, y):
-        """ Give a reasonable estimate for what the possible fit parameters could be for both Gaussians.
-        Returns two arrays where the first is a guess for the taller Gaussian and the second the shorter.
-        You can read the documentation for a detailed overview of how the algorithm works. """
-        first_peak = y.argmax()
-        intersection = self.n_consecutive_increases(y[first_peak:], 3)
-        # It's possible that no intersection is found
-        if intersection:
-            split = intersection + first_peak
-            x_dark, x_bright = x[:split], x[split:]
-            y_dark, y_bright = y[:split], y[split:]
-            dark_std_guess = fwhm(x_dark, y_dark) / (2 * np.sqrt(2 * np.log(2)))
-            bright_std_guess = fwhm(x_bright, y_bright) / (2 * np.sqrt(2 * np.log(2)))
-            dark_params, dark_cov = curve_fit(gaussian, x_dark, y_dark,
-                                               p0=[x_dark[y_dark.argmax()], dark_std_guess, y_dark.max()])
-            bright_params, bright_cov = curve_fit(gaussian, x_bright, y_bright,
-                                               p0=[x_bright[y_bright.argmax()], bright_std_guess, y_bright.max()])
-        else:
-            dark_params, dark_cov = curve_fit(gaussian, x, y)
-            bright_params = [np.inf for i in range(3)]
-        return dark_params, bright_params
 
-    def n_consecutive_increases(self, array, n):
-        """ Return the index of the first occurence of n consecutive increases if one exists. If none exist
-        then this method returns None."""
-        for i in range(array.size - n):
-            if all(array[i: i + n] == np.sort(array[i:i + n])) and np.size(np.unique(array[i: i + n])) == n:
-                return i
-        return
     
 class BlueImageProcessor(ImageProcessor):
 
@@ -347,14 +309,3 @@ def periodic_gaussian_2d(n_sites, std, scaling, offset):
     def helper(r, a0_x, a0_y, a1_x, a1_y, offset_x, offset_y):
         ans = 0
         #for i in range()
-
-def gaussian(x, mean, std, a):
-    return a * np.exp(- (x - mean) ** 2 / (2 * std ** 2))
-
-def double_gaussian(x, mean_1, std_1, a_1, mean_2, std_2, a_2):
-    return gaussian(x, mean_1, std_1, a_1) + gaussian(x, mean_2, std_2, a_2)
-
-def fwhm(x, y):
-    half_max = y.max() / 2
-    over_half_max = np.where(y > half_max)
-    return x[over_half_max[0][1]] - x[over_half_max[0][0]]
