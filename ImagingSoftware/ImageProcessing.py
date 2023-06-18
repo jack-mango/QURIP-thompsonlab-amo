@@ -231,7 +231,6 @@ class GreenImageProcessor(ImageProcessor):
                     first_dark = self.crop_index(tweezer_num, loop_num, first_dark[0])
                 if last_bright > first_dark:
                     # First dark to last bright should be set to unknown
-                    # Problem is there are two (or more) times when we switch back and forth from bright to dark
                     first_dark = last_bright
                 labels[first: last_bright] = np.ones(last_bright - first)
                 labels[last_bright: first_dark] = np.full(first_dark - last_bright, None)
@@ -245,18 +244,18 @@ class GreenImageProcessor(ImageProcessor):
             thresholds[i] = self.find_site_threshold(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)])
         return thresholds     
         
-    def find_site_threshold(self, site_crops, z=2):
+    def find_site_threshold(self, site_crops, z=4.753424308822899):
         """ Find the pixel threshold of the possibly two Gaussian distributions in site_crops.
         The thresholds are selected to be z standard deviations above or below the mean for the 
         two distributions. """
         avg = np.mean(site_crops, axis=(1, 2))
-        counts, bins = np.histogram(avg, bins=30)
+        counts, bins = np.histogram(avg, bins=(self.per_loop // 4))
         centers = (bins[:-1] + bins[1:]) / 2
         fitting = AutoGauss(centers, counts)
         dark_fit, bright_fit = fitting.fit_gaussians()
-        upper = bright_fit[0] + bright_fit[1] * z
-        lower = dark_fit[0] - dark_fit[1] * z
-        return np.array([lower, upper])
+        lower_thresh = bright_fit[0] - bright_fit[1] * z
+        upper_thresh = dark_fit[0] + dark_fit[1] * z
+        return np.array([lower_thresh, upper_thresh])
 
 
     
