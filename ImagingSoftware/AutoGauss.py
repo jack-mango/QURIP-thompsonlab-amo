@@ -28,7 +28,7 @@ class AutoGauss():
         else:
             params, cov = curve_fit(double_gaussian, self.x_data, self.y_data,
                                      p0=[*first_guess, *second_guess])
-            return params[:2], params[3:5]
+            return params[:3], params[3:]
                    
     def double_gaussians_guess(self):
         """ Give a reasonable estimate for what the possible fit parameters could be for both Gaussians.
@@ -44,10 +44,10 @@ class AutoGauss():
             first_std_guess = self.fwhm(x_first, y_first) / (2 * np.sqrt(2 * np.log(2)))
             second_std_guess = self.fwhm(x_second, y_second) / (2 * np.sqrt(2 * np.log(2)))
             first_params, first_cov = curve_fit(gaussian, x_first, y_first,
-                                               p0=[x_first[y_first.argmax()], first_std_guess, y_first.max()],
+                                               p0=[x_first[y_first.argmax()], first_std_guess, y_first.mean()],
                                                bounds=self.GAUSSIAN_BOUNDS)
             second_params, second_cov = curve_fit(gaussian, x_second, y_second,
-                                               p0=[x_second[y_second.argmax()], second_std_guess, y_second.max()],
+                                               p0=[x_second[y_second.argmax()], second_std_guess, y_second.mean()],
                                                bounds=self.GAUSSIAN_BOUNDS)
         else:
             first_params = second_params = [np.inf for i in range(3)]

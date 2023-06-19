@@ -117,8 +117,8 @@ class ImageProcessor():
         return np.array(positions)
 
     def crop(self, x, y, h_border, v_border):
-        """ Returns the image corresponding to the pixels centered at (x, y), with horizontal
-          and vertical borders of pixels corresponding to h_border and v_border. """
+        """ Returns the images from the stack corresponding to the pixels centered at (x, y),
+          with horizontal and vertical borders of pixels corresponding to h_border and v_border. """
         return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border),
                     self.pixel(y - v_border): self.pixel(y + v_border)]
     
@@ -128,7 +128,7 @@ class ImageProcessor():
         cropped_sites = []
         for position in self.lattice_site_positions:
             cropped_sites.append(self.crop(*position, h_border, v_border))
-        return np.concatenate(tuple(cropped_sites))
+        return np.array(cropped_sites)
     
     def dataset_index(self, tweezer_num, loop_num, img_num):
         """ Given tweezer number, loop number, and image number, return the index that corresponds to the image
@@ -211,29 +211,30 @@ class GreenImageProcessor(ImageProcessor):
         algorithm used for classification in the documentation. """
         crops = self.crop_sites(1)
         thresholds = self.find_thresholds(crops)
-        crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
+        #crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
         labels = np.empty(self.n_tweezers * self.n_loops * self.per_loop)
-        for tweezer_num, tweezer in enumerate(crops):
-            for loop_num, loop in enumerate(tweezer):
+        for tweezer_num in range(self.n_tweezers):
+            for loop_num in range(self.n_loops):
                 # NOTE: Might need to change this to a weighted Gaussian instead of pure mean.
+                loop = crops[self.crop_index(tweezer_num, loop_num, 0): self.crop_index(tweezer_num, loop_num + 1, 0)]
                 avg = np.mean(loop, axis=(1, 2))
-                last_bright = np.where(avg > thresholds[tweezer_num][1])[0]
-                first_dark = np.where(avg < thresholds[tweezer_num][0])[0]         
+                over_upper_thresh = np.where(avg > thresholds[tweezer_num][1])[0]
+                under_lower_thresh = np.where(avg < thresholds[tweezer_num][0])[0]         
                 first = self.crop_index(tweezer_num, loop_num, 0)
                 last = self.crop_index(tweezer_num, loop_num + 1, 0)
-                if last_bright.size == 0:
+                if over_upper_thresh.size == 0:
                     last_bright = first
                 else:
-                    last_bright = self.crop_index(tweezer_num, loop_num, last_bright[-1] + 1)
-                if first_dark.size == 0:
+                    last_bright = self.crop_index(tweezer_num, loop_num, over_upper_thresh[-1] + 1)
+                if under_lower_thresh.size == 0:
                     first_dark = last
                 else:
-                    first_dark = self.crop_index(tweezer_num, loop_num, first_dark[0])
+                    first_dark = self.crop_index(tweezer_num, loop_num, under_lower_thresh[0])
                 if last_bright > first_dark:
                     # First dark to last bright should be set to unknown
                     first_dark = last_bright
                 labels[first: last_bright] = np.ones(last_bright - first)
-                labels[last_bright: first_dark] = np.full(first_dark - last_bright, None)
+                labels[last_bright: first_dark] = np.full(first_dark - last_bright, np.NaN)
                 labels[first_dark: last] = np.zeros(last - first_dark)
         return labels
     
