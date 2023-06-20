@@ -22,19 +22,19 @@ class ImageProcessor():
         self.n_tweezers = np.prod(lattice_shape)
         self.img_height, self.img_width = stack.shape[1], stack.shape[2]
         self.a0, self.a1, self.lattice_offset = self.lattice_characteristics_rect()
-        self.lattice_site_positions = self.lattice_site_positions()
+        self.tweezer_positions = self.tweezer_positions()
 
     def pixel(self, x):
         """ Rounds x to the nearest integer, corresponding to the nearest pixel.
           Note that x can be an array or a scalar. """
         return np.rint(x).astype(int)
     
-    def lattice_characteristics_rect(self):
+    def lattice_characteristics_rect(self, plot=False):
         """ Approximates the lattice constants a0 and a1, and lattice offset by fitting periodic Gaussians
           to the averaged stack array. This algorithm assumes that the lattice has a rectangular shape. More
           about the algorithm used can be found in the documentation"""
-        xdata = np.mean(self.stack, axis=(0, 1))
-        ydata = np.mean(self.stack, axis=(0, 2))
+        xdata = np.mean(self.stack, axis=(0, 2))
+        ydata = np.mean(self.stack, axis=(0, 1))
         # TODO: Make the gaussian no longer have to estimate standard deviation, offset and amplitude
         # rather use this information from what can be gathered about the lattice. Amplitude and standard deviation
         # can be gained from the averaged image but offset should probably come from background average.
@@ -58,6 +58,17 @@ class ImageProcessor():
             yparams = down
         else:
             yparams = up
+        if plot:
+            fig, axs = plt.subplots(2, 1, figsize=(16, 8))
+            x_vals = np.linspace(0, self.img_width, 1000)
+            y_vals = np.linspace(0, self.img_height, 1000)
+            xfunc, yfunc = periodic_gaussian_1d(self.lattice_shape[0]), periodic_gaussian_1d(self.lattice_shape[1])
+            axs[0].plot(xdata, 'k.')
+            axs[0].plot(x_vals, xfunc(x_vals, *xparams))
+            axs[0].set_title("Flattened X Values")
+            axs[1].plot(ydata, 'k.')
+            axs[1].plot(y_vals, yfunc(y_vals, *yparams))
+            axs[1].set_title("Flattened Y Values")
         return np.array([xparams[0], 0]), np.array([0, yparams[0]]), np.array([xparams[1], yparams[1]])
     
     def find_offset(self, data, guess, direction, min_err):
@@ -106,29 +117,28 @@ class ImageProcessor():
         return [lattice_constant, lattice_offset, std, scaling, offset]
 
 
-    def lattice_site_positions(self):
-        """ Returns an array of the positions of the lattice sites. """
+    def tweezer_positions(self):
+        """ Returns an array of the positions of the tweezers. """
         positions = []
-        # replace with np.meshgrid() for speedup
         for i in range(self.n_tweezers):
             row = i // self.lattice_shape[0]
-            col = i - self.lattice_shape[0] * (i // self.lattice_shape[0])
-            positions.append(self.lattice_offset + row * self.a0 + col * self.a1)
+            col = np.mod(i, self.lattice_shape[0])
+            positions.append(self.lattice_offset + col * self.a0 + row * self.a1)
         return np.array(positions)
 
     def crop(self, x, y, h_border, v_border):
         """ Returns the images from the stack corresponding to the pixels centered at (x, y),
           with horizontal and vertical borders of pixels corresponding to h_border and v_border. """
         return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border),
-                    self.pixel(y - v_border): self.pixel(y + v_border)]
+                          self.pixel(y - v_border): self.pixel(y + v_border),]
     
     def crop_sites(self, n):
         """ Given n, return an array containing a crop that includes n x n lattice sites centered on each site. """
         h_border, v_border = self.pixel(n * (self.a0 + self.a1) / 2)
         cropped_sites = []
-        for position in self.lattice_site_positions:
+        for position in self.tweezer_positions:
             cropped_sites.append(self.crop(*position, h_border, v_border))
-        return np.array(cropped_sites)
+        return np.concatenate(cropped_sites, axis=0)
     
     def dataset_index(self, tweezer_num, loop_num, img_num):
         """ Given tweezer number, loop number, and image number, return the index that corresponds to the image
@@ -147,9 +157,9 @@ class ImageProcessor():
             img = self.stack.mean(axis=0)
         else:
             img = self.stack[index]
-        plt.imshow(img, cmap='plasma')
+        plt.imshow(np.transpose(img), cmap='plasma')
         plt.colorbar()
-        for position in self.lattice_site_positions:
+        for position in self.tweezer_positions:
             plt.plot(*position, 'ws', fillstyle='none', alpha=0.8)
         plt.show()
 
@@ -191,7 +201,7 @@ class GreenImageProcessor(ImageProcessor):
         in the crops array that would be returned by make_dataset. """
         return tweezer_num * self.n_loops * self.per_loop + loop_num * self.per_loop + img_num
 
-    def make_dataset(self, n=3, keep_unknowns=False):
+    def make_dataset(self, n=3, keep_unknowns=False, plot=False):
         """ Returns a dataset of cropped images that are labeled by which loop number and which image in the loop
           they're in. If keep_unknowns is set to False, then any crop with a label that correspondds to unknown is 
            discarded from the dataset. Images are labeled by occupancy of central site:
@@ -199,19 +209,18 @@ class GreenImageProcessor(ImageProcessor):
             0 -> unoccupied
             NaN -> unknown. """
         crops = self.crop_sites(n)
-        labels = self.make_labels()
+        labels, thresholds = self.make_labels(plot=plot)
         if keep_unknowns:
             return crops, labels
         else:
-            mask = ~ np.isnan(labels)
+            mask = ~ np.isnan(labels[:, 1])
             return crops[mask], labels[mask] 
     
-    def make_labels(self):
+    def make_labels(self, plot=False):
         """ Given an upper and lower threshold, classify whether lattice sites are occupied. You can read more about the
         algorithm used for classification in the documentation. """
         crops = self.crop_sites(1)
-        thresholds = self.find_thresholds(crops)
-        #crops = np.reshape(crops, (self.n_tweezers, self.n_loops, self.per_loop, *crops.shape[-2:]))
+        thresholds = self.find_thresholds(crops, plot=plot)
         labels = np.empty(self.n_tweezers * self.n_loops * self.per_loop)
         for tweezer_num in range(self.n_tweezers):
             for loop_num in range(self.n_loops):
@@ -236,27 +245,41 @@ class GreenImageProcessor(ImageProcessor):
                 labels[first: last_bright] = np.ones(last_bright - first)
                 labels[last_bright: first_dark] = np.full(first_dark - last_bright, np.NaN)
                 labels[first_dark: last] = np.zeros(last - first_dark)
-        return labels
+        labels = np.transpose(np.array([np.absolute(labels - 1), labels]))
+        return labels, thresholds
     
-    def find_thresholds(self, crops):
+    def find_thresholds(self, crops, plot=False, z=4.753424308822899):
         """ For each site in the lattice, find the pixel thresholds using find_site_threshold. """
+        if plot:
+            fig, axs = plt.subplots(*self.lattice_shape, figsize=(4 * self.lattice_shape[0], 4 * self.lattice_shape[0]))
         thresholds = np.empty((self.n_tweezers, 2))
         for i in range(self.n_tweezers):
-            thresholds[i] = self.find_site_threshold(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)])
-        return thresholds     
+            avg = np.mean(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)], axis=(1, 2))
+            counts, bins = np.histogram(avg, bins=(self.per_loop // 4))
+            centers = (bins[:-1] + bins[1:]) / 2
+            dark_fit, bright_fit = self.fit_gaussians(centers, counts)
+            lower_thresh = bright_fit[0] - bright_fit[1] * z
+            upper_thresh = dark_fit[0] + dark_fit[1] * z
+            thresholds[i] = np.array([lower_thresh, upper_thresh])
+            if plot:
+                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].bar(centers, counts)
+                x_vals = np.linspace(centers.min(), centers.max())
+                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].plot(x_vals, double_gaussian(x_vals, *dark_fit, *bright_fit), 'k')
+                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].axvline(lower_thresh, color='r', linestyle='--')
+                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].axvline(upper_thresh, color='r', linestyle='--')
+                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].set_title(f"Tweezer {i}")
+        return thresholds   
         
-    def find_site_threshold(self, site_crops, z=4.753424308822899):
+    def fit_gaussians(self, centers, counts, ):
         """ Find the pixel threshold of the possibly two Gaussian distributions in site_crops.
         The thresholds are selected to be z standard deviations above or below the mean for the 
-        two distributions. """
-        avg = np.mean(site_crops, axis=(1, 2))
-        counts, bins = np.histogram(avg, bins=(self.per_loop // 4))
-        centers = (bins[:-1] + bins[1:]) / 2
+        two distributions. z = 4.753424308822899 corresponds to a probability of 1e-6 that there exists
+        a brighter crop than that corresponding to this z. """
         fitting = AutoGauss(centers, counts)
-        dark_fit, bright_fit = fitting.fit_gaussians()
-        lower_thresh = bright_fit[0] - bright_fit[1] * z
-        upper_thresh = dark_fit[0] + dark_fit[1] * z
-        return np.array([lower_thresh, upper_thresh])
+        return fitting.fit_gaussians()
+    
+    def plot_thresholds(self):
+        return
 
 
     

@@ -28,5 +28,8 @@ class ImageClassifier():
         self.model = models.load_model(filename)
         return
     
+    def get_fidelity(self):
+        return
+    
     
     

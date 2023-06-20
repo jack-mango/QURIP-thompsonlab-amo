@@ -15,7 +15,7 @@ class AutoGauss():
     def fwhm(self, x, y):
         """ Estimate the full-width a half maximum of the data. """
         half_max = x.max() / 2
-        over_half_max = np.where(y > half_max)
+        over_half_max = np.where(y < half_max)
         return x[over_half_max[0][1]] - x[over_half_max[0][0]]
     
     def fit_gaussians(self):
@@ -36,9 +36,12 @@ class AutoGauss():
         You can read the documentation for a detailed overview of how the algorithm works. """
         first_peak = self.y_data.argmax()
         intersection = self.n_consecutive_increases(self.y_data[first_peak:], 3)
-        # It's possible that no intersection is found
+        if not intersection:
+            intersection = self.n_consecutive_increases(self.y_data[first_peak::-1], 3)
+            if intersection:
+                intersection *= -1
         if intersection:
-            split = intersection + first_peak
+            split = np.absolute(first_peak + intersection)
             x_first, x_second = self.x_data[:split], self.x_data[split:]
             y_first, y_second = self.y_data[:split], self.y_data[split:]
             first_std_guess = self.fwhm(x_first, y_first) / (2 * np.sqrt(2 * np.log(2)))
@@ -50,8 +53,13 @@ class AutoGauss():
                                                p0=[x_second[y_second.argmax()], second_std_guess, y_second.mean()],
                                                bounds=self.GAUSSIAN_BOUNDS)
         else:
-            first_params = second_params = [np.inf for i in range(3)]
+            first_params = np.full(3, np.inf)
+            second_params = np.full(3, -np.inf)
         return first_params, second_params
+    
+    def find_local_min(self, array):
+        """ Given an array, return the index of a local minimum. Does so by splitting array at maximal index,
+        then searching for a minimum on either side using n_consecutive_increases. """
 
     def n_consecutive_increases(self, array, n):
         """ Return the index of the first occurence of n consecutive increases if one exists. If none exist
