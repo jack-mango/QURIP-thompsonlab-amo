@@ -255,28 +255,26 @@ class GreenImageProcessor(ImageProcessor):
         thresholds = np.empty((self.n_tweezers, 2))
         for i in range(self.n_tweezers):
             avg = np.mean(crops[self.crop_index(i, 0, 0): self.crop_index(i + 1, 0, 0)], axis=(1, 2))
-            counts, bins = np.histogram(avg, bins=(self.per_loop // 4))
-            centers = (bins[:-1] + bins[1:]) / 2
-            dark_fit, bright_fit = self.fit_gaussians(centers, counts)
+            dark_fit, bright_fit = self.fit_gaussians(avg)
             lower_thresh = bright_fit[0] - bright_fit[1] * z
             upper_thresh = dark_fit[0] + dark_fit[1] * z
             thresholds[i] = np.array([lower_thresh, upper_thresh])
             if plot:
-                axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].bar(centers, counts)
-                x_vals = np.linspace(centers.min(), centers.max())
+                counts, bins, _ = axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].hist(avg, bins=(self.per_loop // 4), density=True)
+                x_vals = np.linspace(bins[0], bins[-1], self.per_loop)
                 axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].plot(x_vals, double_gaussian(x_vals, *dark_fit, *bright_fit), 'k')
                 axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].axvline(lower_thresh, color='r', linestyle='--')
                 axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].axvline(upper_thresh, color='r', linestyle='--')
                 axs[i // self.lattice_shape[0]][i % self.lattice_shape[0]].set_title(f"Tweezer {i}")
         return thresholds   
         
-    def fit_gaussians(self, centers, counts, ):
+    def fit_gaussians(self, data):
         """ Find the pixel threshold of the possibly two Gaussian distributions in site_crops.
         The thresholds are selected to be z standard deviations above or below the mean for the 
         two distributions. z = 4.753424308822899 corresponds to a probability of 1e-6 that there exists
         a brighter crop than that corresponding to this z. """
-        fitting = AutoGauss(centers, counts)
-        return fitting.fit_gaussians()
+        model = GMM(data)
+        return model.fit()
     
     def plot_thresholds(self):
         return

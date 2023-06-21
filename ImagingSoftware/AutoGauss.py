@@ -1,7 +1,10 @@
 import numpy as np
 from scipy.optimize import curve_fit
+from sklearn.mixture import GaussianMixture
 
-class AutoGauss():
+class AutoGauss_v1():
+
+    """ DEPRECATED """
 
     GAUSSIAN_BOUNDS = (
         [-np.inf, 0, -np.inf],
@@ -18,7 +21,7 @@ class AutoGauss():
         over_half_max = np.where(y < half_max)
         return x[over_half_max[0][1]] - x[over_half_max[0][0]]
     
-    def fit_gaussians(self):
+    def fit(self):
         """ Try to fit two Gaussians to the data given in data. To do so first we try to fit the Gaussian to 
         each peak separately, then try to do a fit of both together. If the data is found to only contain
         one Gaussian, then the corresponding fit parameters are set to np.inf. """
@@ -69,7 +72,21 @@ class AutoGauss():
                 return i
         return
     
+class GMM():
 
+    def __init__(self, data):
+        self.data = data
+
+    def fit(self):
+        model = GaussianMixture(2)
+        model.fit(np.reshape(self.data, (-1, 1)))
+        means = model.means_.flatten()
+        stds = np.sqrt(model.covariances_.flatten())
+        amplitudes = model.weights_.flatten() / (stds * np.sqrt(2 * np.pi))
+        if means[0] < means[1]:
+            return np.array([means[0], stds[0], amplitudes[0]]), np.array([means[1], stds[1], amplitudes[1]])
+        else:
+            return np.array([means[1], stds[1], amplitudes[1]]), np.array([means[0], stds[0], amplitudes[0]])
     
 def gaussian(x, mean, std, a):
     return a * np.exp(- (x - mean) ** 2 / (2 * std ** 2))
