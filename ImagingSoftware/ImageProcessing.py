@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.special import ndtri
@@ -76,6 +77,31 @@ class ImageProcessor():
             axs[1].plot(y_vals, yfunc(y_vals, *yparams))
             axs[1].set_title("Flattened Y Values")
         return np.array([xparams[0], 0]), np.array([0, yparams[0]]), np.array([xparams[1], yparams[1]])
+
+    def find_tweezer_positions(self, r=2):
+        """ 
+        Attempts to find locations of tweezers for any arbitrary layout. Does so by find brightest
+        local maxima in the average of the stack, then setting regions of (2r + 1, 2r + 1) to zero in 
+        order to prevent double counting bright pixels associated with the same tweezer. Since it's
+        possible that this masking isn't large enough, if any "bright" pixels are adjacent to a mask,
+        they're considered to be part of that tweezer and masked off as well.
+        """
+        positions = []
+        img = np.mean(self.stack, axis=0)
+        dilate = cv2.dilate(img, None)
+        erode = cv2.erode(dilate, None)
+        matching = np.where(erode == img, img, -255)
+        i = 0
+        d = 2 * r + 1
+        while i < self.n_tweezers:
+            pos = np.unravel_index(np.argmax(matching), img.shape)
+            if any(i == 0 for i in pos) or (matching[pos[0] - 1: pos[0] + 1, pos[1] - 1: pos[1] + 1] == 0).any():
+                matching[pos] = 0
+            else:
+                matching[pos[0] - r: pos[0] + r + 1, pos[1] - r: pos[1] + r + 1] = np.zeros((d, d))
+                positions.append(pos)
+                i += 1
+        return positions
 
     def find_offset(self, data, guess, direction, min_err):
         """ 

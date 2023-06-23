@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras import datasets, layers, models, optimizers
 
@@ -28,8 +29,15 @@ class ImageClassifier():
         self.model = models.load_model(filename)
         return
     
-    def get_fidelity(self):
-        return
+    def get_fidelity(self, images, n_tweezers, n_loops):
+        """ Return probability of bright to dark and dark to bright of each tweezer. """
+        labels = np.reshape(self.classify(images)[:, 1], (n_tweezers, n_loops, -1))
+        first_diff = np.diff(labels, axis=2)
+        n_dark_to_bright = np.sum(first_diff == -1, axis=(1, 2))
+        n_dark = np.sum(labels[:,:,:-1] == 0, axis=(1, 2))
+        n_bright_to_dark = np.sum(first_diff == 1, axis=(1, 2))
+        n_bright = np.sum(labels[:,:,:-1] == 1, axis=(1, 2))
+        return n_dark_to_bright / n_dark, n_bright_to_dark / n_bright
     
     
     
