@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from scipy.special import ndtri
 
-from AutoGauss import *
+from ImagingSoftware.AutoGauss import *
 
 
 class ImageProcessor():
