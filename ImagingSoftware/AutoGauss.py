@@ -1,4 +1,6 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import multivariate_normal
 from scipy.optimize import curve_fit
 from sklearn.mixture import GaussianMixture
 
@@ -87,9 +89,47 @@ class GMM():
             return np.array([means[0], stds[0], amplitudes[0]]), np.array([means[1], stds[1], amplitudes[1]])
         else:
             return np.array([means[1], stds[1], amplitudes[1]]), np.array([means[0], stds[0], amplitudes[0]])
+        
+class Gaussian2D():
+
+    """
+    Used to fit two dimensional Gaussian distribution to image data. Pixel coordinates are generated at
+    the center of each square pixel for the corresponding value in that pixel.
+    """
+
+    def __init__(self, data):
+        self.data = data
+
+    def make_coordinates(self):
+        height, width = self.data.shape
+        x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+        x_centers = x_coords + 0.5
+        y_centers = y_coords + 0.5
+        return x_centers.flatten(), y_centers.flatten()
+    
+    def fit(self, guess=None):
+        plt.imshow(self.data)
+        coordinates = self.make_coordinates()
+        width, height = self.data.shape
+        if guess is None:
+            guess = [width / 2, height / 2, 1, 1, 0, self.data.max() - self.data.min(), self.data.min()]
+        params, cov = curve_fit(gaussian_2d, coordinates, self.data.flatten(), 
+                                bounds=[np.zeros(7), [width, height, np.inf, np.inf, 2 * np.pi, np.inf, np.inf]])
+        return params[:-2]
+
     
 def gaussian(x, mean, std, a):
     return a * np.exp(- (x - mean) ** 2 / (2 * std ** 2))
 
 def double_gaussian(x, mean_1, std_1, a_1, mean_2, std_2, a_2):
     return gaussian(x, mean_1, std_1, a_1) + gaussian(x, mean_2, std_2, a_2)
+
+def gaussian_2d(xy, mean_x, mean_y, std_x, std_y, theta, amplitude, offset):
+    x, y = xy
+    x_diff, y_diff = x - mean_x, y - mean_y
+    cos_theta, sin_theta = np.cos(theta), np.sin(theta)
+    x_rotated = x_diff * cos_theta + y_diff * sin_theta
+    y_rotated = -x_diff * sin_theta + y_diff * cos_theta
+    exponent = -0.5 * ((x_rotated / std_x)**2 + (y_rotated / std_y)**2)
+    denominator = 2 * np.pi * std_x * std_y
+    return offset + amplitude * np.exp(exponent) / denominator

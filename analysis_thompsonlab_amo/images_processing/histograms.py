@@ -151,7 +151,7 @@ class weighted_histogram_556:
 
         files = self.imageStack
         nImages = self.nImages
-        numPixels = np.shape(self.pixelWeight)[0]
+        numPixels = len(self.pixelWeight)
         mask = np.ones((np.shape(files)[1], np.shape(files)[2]))
         weightedImages = []
         self.bk = []
