@@ -157,7 +157,7 @@ class weighted_histogram_556:
         self.bk = []
         if weights:
             for i in range(numPixels):
-                mask[self.pixelWeight[i][0][0], self.pixelWeight[i][0][1]] = self.pixelWeight[i][1]
+                mask[int(self.pixelWeight[i][0][0]), int(self.pixelWeight[i][0][1])] = self.pixelWeight[i][1]
 
             if transpose:
                 mask_for_plot = mask.T

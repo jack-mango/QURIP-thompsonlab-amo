@@ -86,9 +86,9 @@ class GMM():
         stds = np.sqrt(model.covariances_.flatten())
         amplitudes = model.weights_.flatten() / (stds * np.sqrt(2 * np.pi))
         if means[0] < means[1]:
-            return np.array([means[0], stds[0], amplitudes[0]]), np.array([means[1], stds[1], amplitudes[1]])
+            return np.array([means[0], stds[0], amplitudes[0]], [means[1], stds[1], amplitudes[1]])
         else:
-            return np.array([means[1], stds[1], amplitudes[1]]), np.array([means[0], stds[0], amplitudes[0]])
+            return np.array([means[1], stds[1], amplitudes[1]], [means[0], stds[0], amplitudes[0]])
         
 class Gaussian2D():
 
