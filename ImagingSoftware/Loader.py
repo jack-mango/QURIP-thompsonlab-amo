@@ -1,7 +1,7 @@
 import os
 import numpy as np
 from tensorflow.keras import models
-from scipy import loadmat
+from scipy.io import loadmat
 
 class Loader():
 
@@ -24,10 +24,13 @@ class Loader():
     def load_data(self):
         if os.path.isdir(self.data_path):
             stack = []
+            n_files = 0
             for i, file in enumerate(os.listdir(self.data_path)):
                 if file.endswith('.mat'):
-                    stack.append(loadmat(self.data_path))
-            return np.concatenate(stack), i + 1
+                    data = loadmat(self.data_path + '/' + file)
+                    stack.append(data['stack'])
+                    n_files += 1
+            return np.concatenate(stack), n_files
         else:
             return loadmat(self.data_path), 1
         

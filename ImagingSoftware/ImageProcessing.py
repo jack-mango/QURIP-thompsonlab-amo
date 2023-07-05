@@ -11,7 +11,7 @@ class ImageProcessor():
         A base class that can be used to process lattice images and determine occupancy.
     """
 
-    def __init__(self, stack, n_tweezers, n_loops, tweezers_per_crop):
+    def __init__(self, stack, n_tweezers, n_loops):
         """
         stack : An array of images, with the first axis being the image axis and the remaining two being pixel
             intensity values.
@@ -22,14 +22,13 @@ class ImageProcessor():
         self.n_tweezers = n_tweezers
         self.n_loops = n_loops
         self.per_loop = self.stack.shape[0] // n_loops
-        self.tweezers_per_crop = tweezers_per_crop
         self.img_height, self.img_width = stack.shape[1], stack.shape[2]
 
     def run(self):
         positions = self.find_centroids()
         nn_dist = self.find_nn_dist(positions)
-        crops_3x3 = self.crop_tweezer(3, nn_dist)
-        crops_1x1 = self.crop_tweezer(1, nn_dist)
+        crops_3x3 = self.crop_tweezer(3, nn_dist, positions)
+        crops_1x1 = self.crop_tweezer(1, nn_dist, positions)
         return crops_3x3, crops_1x1, positions
 
     def pixel(self, x):
@@ -67,7 +66,8 @@ class ImageProcessor():
         for img in frac_stack:
             img = np.copy(img).astype('uint8')
             img = cv2.GaussianBlur(img, (3, 3), 0)
-            dark_params, bright_params = self.bright_dark_fit(img.flatten())
+            model = AutoGauss.GMM(img.flatten())
+            dark_params, bright_params = model.fit()
             # FIXME find a better default value to use
             thresh = -4 * np.maximum(dark_params[1], 0.6)
             img = cv2.adaptiveThreshold(
@@ -99,8 +99,7 @@ class ImageProcessor():
         between two tweezer positions, and identifying the horizontal/vertical distance between these tweezer distances. The
         nearest neighbor distance is taken to be the larger of horizontal and vertical nearest neighbor distances.
         """
-        min_dist, closest_pair = self.closest_pair_distance(
-            self.tweezer_positions)
+        min_dist, closest_pair = self.closest_pair_distance(positions)
         return np.max(np.absolute(np.diff(closest_pair, axis=0)))
 
     def closest_pair_bf(self, points):
@@ -166,16 +165,16 @@ class ImageProcessor():
         return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border),
                           self.pixel(y - v_border): self.pixel(y + v_border), ]
 
-    def crop_tweezer(self, n, nn_dist):
+    def crop_tweezer(self, n, nn_dist, tweezer_positions):
         """
         Given n, return an array containing a crop that includes n x n nearest neighbor distances of pixels centered
         on each tweezer in the image.
         """
         h_border = v_border = self.pixel(n * nn_dist / 2)
         cropped_tweezers = []
-        for position in self.tweezer_positions:
+        for position in tweezer_positions:
             cropped_tweezers.append(self.crop(*position, h_border, v_border))
-        return np.concatenate(cropped_tweezers, axis=0)
+        return np.array(cropped_tweezers)
 
     #def plot(self, index=None):
     #    """

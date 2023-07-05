@@ -26,7 +26,7 @@ class ModelTrainer():
         info = self.information(metrics, fidelity)
         return self.model, info
 
-    def information(metrics, fidelity):
+    def information(self, metrics, fidelity):
         info = {
 
         }
@@ -34,10 +34,10 @@ class ModelTrainer():
 
     def train(self):
         """ Train the neural network for this dataset processing using the provided labels. """
-        return self.model.fit(self.training_images, self.training_labels, epochs=self.epochs)
+        return self.model.fit(self.training_crops, self.training_labels, epochs=self.epochs)
     
     def evaluate(self):
-        return self.model.evaluate(self.testing_images, self.testing_labels)
+        return self.model.evaluate(self.testing_crops, self.testing_labels)
     
     def fidelity_analysis(self, n_tweezers, n_loops, plot=False):
         """ Return probability of bright to dark and dark to bright of each tweezer. """

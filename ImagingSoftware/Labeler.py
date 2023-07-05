@@ -16,10 +16,10 @@ class Labeler():
     What about fits for the plots? Parameters are needed for that right?
     """
 
-    def __init__(self, crops, n_tweezers, n_loops, per_loop):
+    def __init__(self, crops, n_tweezers, n_loops):
         self.n_tweezers = n_tweezers
         self.n_loops = n_loops
-        self.per_loop = per_loop
+        self.per_loop = crops.shape[1] // n_loops
         self.crop_brightness = self.find_crop_brightness(crops)
 
     def run(self):
@@ -66,8 +66,8 @@ class Labeler():
             plt.tight_layout(pad=2)
         thresholds = np.empty((self.n_tweezers, 2))
         for i, fit in enumerate(fits):
-            lower_thresh = fit[0, 0] - fit[0, 1] * z
-            upper_thresh = fit[1, 0] + fit[1, 1] * z
+            lower_thresh = fit[1, 0] - fit[1, 1] * z
+            upper_thresh = fit[0, 0] + fit[0, 1] * z
             thresholds[i] = np.array([lower_thresh, upper_thresh])
             #if plot:
             #    counts, bins, _ = axs[i // 5][i %
