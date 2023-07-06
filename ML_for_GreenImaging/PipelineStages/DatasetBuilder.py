@@ -22,7 +22,7 @@ class DatasetBuilder():
         info = self.dataset_statistics(training_labels, testing_labels)
         for key, val in info.items():
             log.info(f"{key}: {val}")
-        return (training_crops, training_labels), (testing_crops, testing_labels), (self.crops, self.labels), info
+        return (training_crops, training_labels), (testing_crops, testing_labels), self.crops, info
 
     def dataset_statistics(self, training_labels, testing_labels):
         info = {"Number of Training Images": training_labels.shape[0],

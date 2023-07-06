@@ -4,6 +4,7 @@
 
 # unless they're python,
 !*.py
+/analysis_thompsonlab_amo
 
 # a jupyter notebook
 !*.ipynb
