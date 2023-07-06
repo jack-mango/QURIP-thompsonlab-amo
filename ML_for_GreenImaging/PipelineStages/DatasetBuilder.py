@@ -29,7 +29,7 @@ class DatasetBuilder():
                 "Number of Testing Images": testing_labels.shape[0],
                 "Training Bright Fraction": self.bright_fraction(training_labels),
                 "Testing Bright Fraction": self.bright_fraction(testing_labels),
-                "Number of Unlabeled Images": np.sum(np.isnan(self.labels))
+                "Labeled Dataset Fraction": 1 - np.sum(np.isnan(self.labels)) /self.crops.shape[0]
                 }
         return info
     

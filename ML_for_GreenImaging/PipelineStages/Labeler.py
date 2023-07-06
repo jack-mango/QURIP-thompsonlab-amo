@@ -1,4 +1,5 @@
 import numpy as np
+import cv2
 import matplotlib.pyplot as plt
 from . import ImageProcessing, AutoGauss
 import os
@@ -37,7 +38,7 @@ class Labeler():
         thresholds, plots = self.find_thresholds(fits)
         bad_thresholds = self.threshold_misfits(thresholds)
         labels = self.make_labels(thresholds)
-        info = {"Plot": plots, "Thresholds": thresholds, "Bad Thresholds": bad_thresholds} # Add R^2 vals
+        info = {"Histogram fits plot": plots, "Thresholds": thresholds, "Bad Thresholds": bad_thresholds} # Add R^2 vals
         return labels, info
     
     def bright_dark_fit(self):
@@ -55,7 +56,9 @@ class Labeler():
         """
         Given an array of image crops corresponding to a single tweezer give the average pixel value for the image
         """
-        return np.mean(crops, axis=(2, 3))
+        kernel = np.ravel(gaussian_kernel(crops.shape[-1]))
+        return np.average(np.reshape(crops, (*crops.shape[:2], -1)), weights=kernel, axis=2)
+        #return np.mean(crops, axis=(2, 3))
     
     def find_thresholds(self, fits, z=4.753424308822899):
         """
@@ -173,3 +176,7 @@ class Labeler():
     #    for i in range(self.n_loops):
     #        plt.axvline(i * self.per_loop, color='k', linestyle='--', label="Loop Separation")
     #    plt.show()
+
+def gaussian_kernel(n):
+    sep = cv2.getGaussianKernel(n, 0)
+    return np.matmul(sep, sep.T)

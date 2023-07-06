@@ -42,6 +42,7 @@ class Loader():
         
     def load_model(self):
         if self.model_path is None:
+            # Add default model creation?
             return
         else:
             return models.load_model(self.model_path)

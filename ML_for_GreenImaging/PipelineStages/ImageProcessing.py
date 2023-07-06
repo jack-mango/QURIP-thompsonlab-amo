@@ -30,8 +30,8 @@ class ImageProcessor():
         nn_dist = self.find_nn_dist(positions)
         log.info(f"Found nearest neighbor distance to be {nn_dist:.3}")
         crops_3x3 = self.crop_tweezer(3, nn_dist, positions)
-        crops_1x1 = self.crop_tweezer(1, nn_dist, positions)
-        info = {"Plot": self.plot(positions), "Positions": positions}
+        crops_1x1 = self.crop_tweezer(1, nn_dist + 1, positions)
+        info = {"Positions plot": self.plot(positions), "Positions": positions}
         return crops_3x3, crops_1x1, positions, info
 
     def pixel(self, x):
@@ -41,22 +41,19 @@ class ImageProcessor():
         return np.rint(x).astype(int)
     
     def find_tweezer_positions(self):
-        img = np.mean(self.fractional_stack(8), axis=0)
-        self.tweezer_positions = self.find_centroids()
-        nn_dist = self.find_nn_dist()
-        updated_positions = []
-        guess = None
-        for centroid in self.tweezer_positions:
-            border = (nn_dist  + 1 )/ 2
-            crop = img[self.pixel(centroid[0] - border):self.pixel(centroid[0] + border),
-                        self.pixel(centroid[1] - border):self.pixel(centroid[1] + border)]
-            model = AutoGauss.Gaussian2D(crop)
-            params = model.fit(guess)
-            if guess is None:
-                guess = params
-            center = np.array([self.pixel(centroid[0] - border), self.pixel(centroid[1] - border)]) + np.array(params[:2])
-            updated_positions.append(center)
-        return np.concatenate(updated_positions, axis=0)
+        centroids = self.find_centroids()
+        nn_dist = self.find_nn_dist(centroids)
+        crops1x1 = self.crop_tweezer(1, nn_dist, centroids)
+        positions = np.empty((self.n_tweezers, 2))
+        weights = [] # need to get the size right; find lower right (maybe left?) corner correctly
+        for i, tweezer in enumerate(crops1x1):
+            first_per_loop = np.concatenate([tweezer[i:i + self.per_loop // 2] for i in range(0, self.n_loops, self.per_loop)])
+            if i == 24:
+                plt.imshow(np.mean(first_per_loop, axis=0))
+            position, tweezer_weights = self.fit_gaussian_to_image(np.mean(tweezer, axis=0))
+            positions[i] = position + centroids[i] - np.full(2, self.pixel(nn_dist / 2))
+            weights.append(tweezer_weights)
+        return positions
 
     def find_centroids(self):
         """ 
@@ -165,19 +162,19 @@ class ImageProcessor():
         Returns the images from the stack corresponding to the pixels centered at (x, y),
         with horizontal and vertical borders of pixels corresponding to h_border and v_border.
         """
-        return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border),
-                          self.pixel(y - v_border): self.pixel(y + v_border), ]
+        return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border) + 1,
+                          self.pixel(y - v_border): self.pixel(y + v_border)+ 1]
 
-    def crop_tweezer(self, n, nn_dist, tweezer_positions):
+    def crop_tweezer(self, n, nn_dist, centers):
         """
         Given n, return an array containing a crop that includes n x n nearest neighbor distances of pixels centered
         on each tweezer in the image.
         """
         h_border = v_border = self.pixel(n * nn_dist / 2)
-        cropped_tweezers = []
-        for position in tweezer_positions:
-            cropped_tweezers.append(self.crop(*position, h_border, v_border))
-        return np.array(cropped_tweezers)
+        crops = []
+        for center in centers:
+            crops.append(self.crop(*center, h_border, v_border))
+        return np.array(crops)
 
     def plot(self, positions):
         """
@@ -187,8 +184,13 @@ class ImageProcessor():
         fig = plt.figure()
         img = self.stack.mean(axis=0)
         img = plt.imshow(img.T, cmap='viridis')
-        plt.plot(*positions.T, 'ws', fillstyle='none', alpha=0.4)
+        plt.plot(*positions.T, 'r.')
         plt.colorbar()
         plt.title("Tweezer Positions")
         return fig
-        
+
+    def fit_gaussian_to_image(self, image_data):
+        model = AutoGauss.Gaussian2D(image_data)
+        params = model.fit()
+        weights = model.func(model.make_coordinates(), 1, *params, 0)
+        return np.array(params[:2]), weights
