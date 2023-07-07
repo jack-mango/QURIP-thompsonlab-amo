@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import multivariate_normal
 from scipy.optimize import curve_fit
-from sklearn.mixture import GaussianMixture
+from sklearn.mixture import GaussianMixture as GMM
 
 import logging
 log = logging.getLogger(__name__)
@@ -77,26 +77,37 @@ class AutoGauss_v1():
                 return i
         return
     
-class GMM():
+class GaussianMixture():
 
     def __init__(self, data):
         self.data = data
 
     def fit(self):
-        model = GaussianMixture(2)
+        model = GMM(2)
         model.fit(np.reshape(self.data, (-1, 1)))
         means = model.means_.flatten()
         stds = np.sqrt(model.covariances_.flatten())
         amplitudes = model.weights_.flatten() / (stds * np.sqrt(2 * np.pi))
         if means[0] < means[1]:
-            return np.array(
-                [[means[0], stds[0], amplitudes[0]],
-                 [means[1], stds[1], amplitudes[1]]])
+            lower = [means[0], stds[0], amplitudes[0]]
+            upper = [means[1], stds[1], amplitudes[1]]
         else:
-            return np.array(
-                [[means[1], stds[1], amplitudes[1]],
-                 [means[0], stds[0], amplitudes[0]]]
-                )
+            upper = [means[0], stds[0], amplitudes[0]]
+            lower = [means[1], stds[1], amplitudes[1]]
+        r_sq = self.r_squared(lower + upper)
+        return np.array([lower, upper]), r_sq
+
+    def func(self, x, mean_1, std_1, a_1, mean_2, std_2, a_2):
+        return a_1 * np.exp(- (x - mean_1) ** 2 / (2 * std_1 ** 2)) + a_2* np.exp(- (x - mean_2) ** 2 / (2 * std_2 ** 2))
+
+    def r_squared(self, params):
+        vals, bins = np.histogram(self.data, bins=int(1 + self.data.max() - self.data.min()), density=True)
+        centers = (bins[1:] + bins[:-1]) / 2
+        estimated_vals = self.func(centers, *params)
+        sst = np.sum((vals - vals.mean()) ** 2)
+        sse = np.sum((vals - estimated_vals) ** 2)
+        r_sq = 1 - (sse / sst)
+        return r_sq
         
 class MultivariateGaussian():
 

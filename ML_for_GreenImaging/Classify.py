@@ -1,5 +1,6 @@
 from PipelineStages import *
 import argparse
+import numpy as np
 from tensorflow.keras import models
 
 parser = argparse.ArgumentParser(
@@ -15,8 +16,6 @@ parser.add_argument('data_dir', type=str,
                     help="Specify the relative path of the data location")
 parser.add_argument('model_dir', type=str,
                     help="Specify the relative path of where the model is located")
-parser.add_argument('-b', '--build', action='store_true', default=False,
-                    help="If used, a new model will be built and trained from scratch")
                     
 if __name__ == "__main__":
     info = {}
@@ -30,17 +29,9 @@ if __name__ == "__main__":
     processor = ImageProcessing.ImageProcessor(stack, args.n_tweezers, tot_loops)
     crops3x3, crops1x1, positions = processor.run()
 
-    # Create labels
-    labeler = Labeler.Labeler(crops1x1, args.n_tweezers, tot_loops)
-    labels, crop_brightness, fits, thresholds = labeler.run()
-
-    # Make training/testing/fidelity analysis datasets
-    builder = DatasetBuilder.DatasetBuilder(crops3x3, labels)
-    training, testing, fidelity, info = builder.run()
-
     # Traing the model and report its performance
-    trainer = ModelTrainer.ModelTrainer(model, training, testing, fidelity, args.n_tweezers, tot_loops)
-    model, info = trainer.run()
+    classifier = ImageClassifier.ImageClassifier(args.n_tweezers, tot_loops, model, crops3x3)
+    occ, info = classifier.run()
 
-    # Save the model and generate a report of the training process
-    model.save(args.model_dir)
+    # Save positions and occupancies
+    np.savez_compressed(args.data_dir, occupancies = occ)

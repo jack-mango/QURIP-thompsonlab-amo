@@ -45,7 +45,7 @@ if __name__ == "__main__":
     training, testing, fidelity, stage_info = builder.run()
     info.update(stage_info)
 
-    # Traing the model and report its performance
+    # Training the model and report its performance
     trainer = ModelTrainer.ModelTrainer(model, training, testing, fidelity, args.n_tweezers, tot_loops)
     model, stage_info = trainer.run()
     info.update(stage_info)

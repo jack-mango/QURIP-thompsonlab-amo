@@ -22,6 +22,7 @@ class Labeler():
         self.n_loops = n_loops
         self.per_loop = crops.shape[1] // n_loops
         self.img_vals = self.find_img_vals(crops)
+        self.info = None
 
     def run(self):
         """ 
@@ -34,12 +35,15 @@ class Labeler():
         Transients are any shots which correspond to jumps from the metastable state to the ground state, thus causing
         a short burst of dark shots surrounded by otherwise bright ones.
         """
-        fits = self.bright_dark_fit()
+        fits, r_sq = self.bright_dark_fit()
         thresholds, plots = self.find_thresholds(fits)
         bad_thresholds = self.threshold_misfits(thresholds)
         labels = self.make_labels(thresholds)
-        info = {"Histogram fits plot": plots, "Thresholds": thresholds, "Bad Thresholds": bad_thresholds} # Add R^2 vals
-        return labels, info
+        self.info = {"Histogram fits plot": plots,
+                "Thresholds": thresholds,
+                "Bad Thresholds": bad_thresholds,
+                "R^2 Values": r_sq}
+        return labels, self.info
     
     def bright_dark_fit(self):
         """
@@ -47,18 +51,17 @@ class Labeler():
         first and the higher mean one second. 
         """
         fits = np.empty((self.n_tweezers, 2, 3))
+        r_sq = np.empty(self.n_tweezers)
         for i in range(self.n_tweezers):
-            model = AutoGauss.GMM(self.img_vals[i])
-            fits[i] = model.fit()
-        return fits
+            model = AutoGauss.GaussianMixture(self.img_vals[i])
+            fits[i], r_sq[i] = model.fit()
+        return fits, r_sq
     
     def find_img_vals(self, crops):
         """
         Given an array of image crops corresponding to a single tweezer give the average pixel value for the image
         """
-        kernel = np.ravel(gaussian_kernel(crops.shape[-1]))
-        return np.average(np.reshape(crops, (*crops.shape[:2], -1)), weights=kernel, axis=2)
-        #return np.mean(crops, axis=(2, 3))
+        return np.mean(crops, axis=(2, 3))
     
     def find_thresholds(self, fits, z=4.753424308822899):
         """
@@ -147,36 +150,36 @@ class Labeler():
         return labels
 
 
-    #def threshold_plot(self, tweezer_num):
-    #    tweezer_vals = np.mean(self.crops[self.crop_index(tweezer_num, 0, 0): self.crop_index(tweezer_num + 1, 0, 0)], axis=(1, 2))
-    #    tweezer_labels = self.labels[self.crop_index(tweezer_num, 0, 0): self.crop_index(tweezer_num + 1, 0, 0)]
-#
-    #    bright_mask = tweezer_labels[:, 1] == 1
-    #    dark_mask = tweezer_labels[:, 0] == 1
-    #    unknown_mask = np.isnan(tweezer_labels[:, 0])
-#
-    #    bright_indices = np.where(bright_mask)[0]
-    #    bright_vals = tweezer_vals[bright_mask]
-#
-    #    dark_indices = np.where(dark_mask)[0]
-    #    dark_vals = tweezer_vals[dark_mask]
-#
-    #    unknown_indices = np.where(unknown_mask)[0]
-    #    unknown_vals = tweezer_vals[unknown_mask]
-#
-    #    print(len(unknown_vals))
-    #    plt.figure(figsize=(20, 10))
-    #    plt.plot(bright_indices, bright_vals, '.', label='bright')
-    #    plt.plot(dark_indices, dark_vals, '.', label='dark')
-    #    plt.plot(unknown_indices, unknown_vals, 'o', label='?')
-    #    plt.axhline(self.thresholds[tweezer_num, 1], color='r', linestyle='--', label=f"Upper Threshold = {self.thresholds[tweezer_num, 1]:.3f}")
-    #    plt.axhline(self.thresholds[tweezer_num, 0], color='g', linestyle='--', label=f"Lower Threshold = {self.thresholds[tweezer_num, 0]:.3f}")
-    #    plt.legend()
-    #    plt.title(f"Tweezer Number = {tweezer_num}")
-    #    for i in range(self.n_loops):
-    #        plt.axvline(i * self.per_loop, color='k', linestyle='--', label="Loop Separation")
-    #    plt.show()
+    def threshold_plot(self, tweezer_num, labels):
+        thresholds = self.info["Thresholds"]
 
-def gaussian_kernel(n):
-    sep = cv2.getGaussianKernel(n, 0)
-    return np.matmul(sep, sep.T)
+        tweezer_vals = self.img_vals[tweezer_num]
+        tweezer_labels = labels[tweezer_num * self.per_loop * self.n_loops:(tweezer_num + 1)* self.per_loop * self.n_loops:]
+
+        bright_mask = tweezer_labels == 1
+        dark_mask = tweezer_labels == 0
+        unknown_mask = np.isnan(tweezer_labels)
+
+        bright_indices = np.where(bright_mask)[0]
+        bright_vals = tweezer_vals[bright_mask]
+
+        dark_indices = np.where(dark_mask)[0]
+        dark_vals = tweezer_vals[dark_mask]
+
+        unknown_indices = np.where(unknown_mask)[0]
+        unknown_vals = tweezer_vals[unknown_mask]
+
+        print(unknown_mask)
+        print(dark_vals.shape)
+
+        fig = plt.figure(figsize=(20, 10))
+        plt.plot(bright_indices, bright_vals, '.', label='bright')
+        plt.plot(dark_indices, dark_vals, '.', label='dark')
+        plt.plot(unknown_indices, unknown_vals, 'o', label='?')
+        plt.axhline(thresholds[tweezer_num, 1], color='r', linestyle='--', label=f"Upper Threshold = {thresholds[tweezer_num, 1]:.3f}")
+        plt.axhline(thresholds[tweezer_num, 0], color='g', linestyle='--', label=f"Lower Threshold = {thresholds[tweezer_num, 0]:.3f}")
+        plt.legend(loc='upper right')
+        plt.title(f"Tweezer Number = {tweezer_num}")
+        for i in range(self.n_loops):
+            plt.axvline(i * self.per_loop, color='k', linestyle='--', label="Loop Separation")
+        return fig
