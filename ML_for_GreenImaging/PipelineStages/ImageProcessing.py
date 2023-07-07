@@ -233,8 +233,8 @@ class ImageProcessor():
         Returns:
         - crop: an array of every crop from every image in the stack corresponding to the parameters given.
         """
-        return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border),
-                          self.pixel(y - v_border): self.pixel(y + v_border)]
+        return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border) + 1,
+                          self.pixel(y - v_border): self.pixel(y + v_border) + 1]
 
     def crop_tweezer(self, side_length, separation, centers):
         """
@@ -278,19 +278,16 @@ class ImageProcessor():
 
     def fit_gaussian_to_image(self, image_data):
         """
-        Create square crops for every tweezer in the stack, with each having a side length of 
-        n x separation centered at each entry of centers
+        Fit a two dimensional gaussian to a two dimensional array which represents pixel intensities
+        for an image.
 
         Parameters:
-        - side_length: how many nearest neighbor distances each side of the square crop should have. If
-                        if the tweezers are in a rectangular lattice, then each crop would contain at most
-                        side_length x side_length tweezers
-        - separation: number of pixels per side_length unit
-        - centers: an m x 2 array of (x, y) coordinates that specify where crops are taken from
+        - image_data: a two dimensional array with entries represented by pixel values.
 
         Returns:
-        - crops: an array of every crop of every tweezer. Consecutive crops in this array correspond to those 
-                taken around the same center, and the same loop corresponding in the same center.
+        - params: The parameters for the two dimensional gaussian fit
+        - weights: a normalized array of the same size as the image data with values sampled calculated
+                   from the fitted function, considering the pixel indicies as (x, y) coordinates.
         """
         model = AutoGauss.Gaussian2D(image_data)
         params = model.fit()
@@ -299,8 +296,17 @@ class ImageProcessor():
     
     def position_tile_sort(self, positions, tile_size):
         """
-        Sort an array of positions by which tile they fall into on the image. Tiles are squares with the size,
-        tile_size.
+        Sort an array of position vectors based on which square tile they fall into, if all the vectors
+        are contained within a rectangular region. Vectors in tiles closer to the origin are put in front of 
+        those contained in tiles further from the origin.
+
+        Parameters:
+        - positions: an m x 2 array, containing the corrdinates of different position vectors.
+        - tile_size: the side length of the square tile used to divide the rectangular region into tiles. 
+
+        Returns:
+        - sorted_vectors: an m x 2 array of the vectors sorted based on which tile they fall into. If
+                          two vectors fall in the same tile, then the order is ambiguous.
         """
         num_tiles_x = self.img_width // tile_size
         num_tiles_y = self.img_height // tile_size
