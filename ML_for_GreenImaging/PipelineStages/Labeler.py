@@ -9,12 +9,17 @@ log = logging.getLogger(__name__)
 
 class Labeler():
 
-    """ 
-    Task: take in crops and make labels
-    Information out (but not needed for next steps): thresholds, fits and maybe classification graphs? -- store as attributes
+    """
+    Contains the methods used in the labeling step of the training pipeline. Crop labels are generated
+    based on the brightness of the central lattice site.
 
-    I take in crops and produce labels (and thresholds since they're needed for plotting) -- loading data is someone else's job
-    What about fits for the plots? Parameters are needed for that right?
+    Attributes:
+    - n_tweezers: the number of tweezers in the stack images.
+    - n_loops: number of loops in the image stack.
+    - per_loop: the number of images in each loop of the stack.
+    - img_vals: a single value that is attributed to each crop to be labeled.
+    - info: the relevant information gathered when executing this pipeline stage as a
+        dictionary.
     """
 
     def __init__(self, crops, n_tweezers, n_loops):
@@ -22,33 +27,44 @@ class Labeler():
         self.n_loops = n_loops
         self.per_loop = crops.shape[1] // n_loops
         self.img_vals = self.find_img_vals(crops)
+        self.labels = None
         self.info = None
 
+        print(self.img_vals.shape)
+
     def run(self):
-        """ 
-        Returns a dataset of cropped images that are labeled by which loop number and which image in the loop
-        they're in. If keep_unknowns is set to False, then any crop with a label that correspondds to unknown is 
-        discarded from the dataset. Images are labeled by occupancy of central site:
-            [0, 1] -> bright
-            [1, 0] -> dark
-            [NaN, NaN] -> unknown
-        Transients are any shots which correspond to jumps from the metastable state to the ground state, thus causing
-        a short burst of dark shots surrounded by otherwise bright ones.
+        """
+        Execute the necessary methods of this class to output information for
+        the next pipeline stage.
+
+        Returns:
+        - labels: A one dimensional array of labels for each image value. 
+         - info: a dictionary containing a plot of the thresholding fits for each tweezer, the thresholds,
+                the tweezer number of any misfit thresholds, and the R^2 values for bimodal Gaussian fits to image values
+                for each tweezer. 
         """
         fits, r_sq = self.bright_dark_fit()
         thresholds, plots = self.find_thresholds(fits)
-        bad_thresholds = self.threshold_misfits(thresholds)
-        labels = self.make_labels(thresholds)
+        all_below_upper, all_above_lower = self.threshold_misfits(thresholds)
+        self.labels = self.make_labels(thresholds)
         self.info = {"Histogram fits plot": plots,
                 "Thresholds": thresholds,
-                "Bad Thresholds": bad_thresholds,
-                "R^2 Values": r_sq}
-        return labels, self.info
+                "Tweezers missing dark labels": all_above_lower,
+                "Tweezers missing bright labels": all_below_upper,
+                "R^2 Values": r_sq,
+                "Image Value Distribution Fits": fits
+                }
+        return self.labels, self.info
     
     def bright_dark_fit(self):
         """
-        Fit a double gaussian function to the given data and return the parameters of the fit, with the lower mean Gaussian
-        first and the higher mean one second. 
+        Fit a bimodal Gaussian distribution to each self.img_vals for each individual tweezer. 
+
+        Returns:
+        - fits: a self.n_tweezers x 2 x 3 array, where the ith entry in the first axis corresponds to the ith tweezer,
+                the first (second) entry on the second axis corresponds to Gaussian fit with the lower (higher) mean,
+                and the final axis contains the mean, standard deviation, and relative amplitude in that order.
+        - r_sq : the R^2 value of the fits contained in a self.n_tweezers long array. 
         """
         fits = np.empty((self.n_tweezers, 2, 3))
         r_sq = np.empty(self.n_tweezers)
@@ -57,15 +73,42 @@ class Labeler():
             fits[i], r_sq[i] = model.fit()
         return fits, r_sq
     
-    def find_img_vals(self, crops):
+    def find_img_vals(self, crops, r_atom=2.5):
         """
-        Given an array of image crops corresponding to a single tweezer give the average pixel value for the image
+        Assign a brightness score to each image in crops. In the current implementation this is done
+        by taking the average pixel value across each image in crops
+
+        Parameters:
+        - crops: a four dimensional array of images where the first axis corresponds to tweezer number, 
+                the second corresponds to image number, and the final two correspond to the row and column
+                numbers of the pixels within the image.
+
+        Returns:
+        - img_vals: values assigned to each crop according to the function method used by this method
         """
+        #kernel = np.ravel(gaussian_kernel(crops.shape[-1], r_atom * 0.600600600601 / 2))
+        #plt.imshow(gaussian_kernel(crops.shape[-1], r_atom * 0.600600600601 / 2))
+        #plt.colorbar()
+        #return np.average(np.reshape(crops, (*crops.shape[:2], -1)), weights=kernel, axis=2)
         return np.mean(crops, axis=(2, 3))
     
     def find_thresholds(self, fits, z=4.753424308822899):
         """
-        For each site in the lattice, find the pixel thresholds.
+        Assuming img_vals follows a bimodal Gaussian distribution, calculates the image values that are
+        z standard distributions above (below) the lower (upper) threshold. The particular value of z chosen
+        corresponds to the number of standard deviations that 1 - CDF(x) = 1e-6 for a Gaussian distribution along
+        whichever direction corresponds to the lower or upper thresholding.
+
+        Parameters:
+        - fits: parameters for a Gaussian fit. Must be a numpy array with shape (n_tweezers, 2, 3), with the first axis
+                corresponding to tweezer number, the second corresponding to which Gaussian mode (lower mean first, higher 
+                mean second), and the third containing the parameters corresponding to that Gaussian mode, ordered
+                (mean, standard deviation, relative amplitude).
+        - fig: a plot for each tweezer of its bimodal Gaussian fit, its image value histogram, and its thresholds.
+
+        Returns:
+        - sorted_vectors: an m x 2 array of the vectors sorted based on which tile they fall into. If
+                          two vectors fall in the same tile, then the order is ambiguous.
         """
         fig, axs = plt.subplots(self.n_tweezers // 5 + (self.n_tweezers % 5 > 0), 5, figsize=(8.5, 11 * self.n_tweezers / 50))
         fig.tight_layout(h_pad=0.8)
@@ -83,12 +126,23 @@ class Labeler():
             axs[i // 5][i % 5].axvline(upper_thresh, color='r', linestyle='--')
             axs[i // 5][i % 5].set_title(f"Tweezer {i}", fontsize=8)
             axs[i // 5][i % 5].tick_params(axis='both', labelsize=8)
-        return thresholds, (fig, axs)
+        return thresholds, fig
     
-    def make_labels(self, thresholds, plot=False):
+    def make_labels(self, thresholds):
         """
-        Given an upper and lower threshold, classify whether tweezer sites are occupied. You can read more about the
-        algorithm used for classification in the documentation.
+        Create a label for each crop, corresponding to an image value. If the crop's image value falls below the tweezer's lower
+        threshold or in a segment of image values that fall below the lower threshold and don't rise above the upper threshold, then 
+        it is labeled as dark. Similarly if a crop's image value is above the tweezer's upper threshold or in a segment of
+        image values above the upper theshold and don't fall below the lower threshold, then it is labeled as bright. If an image
+        value is between the two thresholds and isn't in a segment of values all above or below one of the thresholds, it is labeled
+        as unknown. Dark crops are labeled by 0, bright crops by 1, and unknown crops by NaNs. 
+
+        Parameters:
+        - thresholds: an n_tweezers x 2 array, with the first axis corresponding to the tweezer number and the second corresponding
+                    to the threshold; lower threshold first and upper threshold second.
+        
+        Returns:
+        - labels: A one dimensional array of labels for each image value. 
         """
         labels = np.empty((self.n_tweezers, self.n_loops, self.per_loop))
         for i, tweezer_vals in enumerate(self.img_vals):
@@ -99,9 +153,17 @@ class Labeler():
     
     def slicer(self, arr, lower_thresh, upper_thresh):
         """
-        Labels images as bright if they fall between two images that exceed bright thresholds, and similarly
-        dark if image falls between two images exceeding dark threshold. If an image lies on the transition from
-        a dark to a bright threshold it's labeled as unknown, enocded with an np.NaN.
+        Finds where values of arr that are above (below) upper_thresh (lower_thresh). Indices of arr that lie between two
+        indices that are both above or below the same threshold are labeled as bright (1) or dark (0). Indices of arr that
+        are between the two thresholds are labeled as unknown (NaN).
+
+        Parameters:
+        - arr: a one dimensional array of image values.
+        - lower_thresh: a single number to be used as the lower threshold.
+        - upper_thresh: a single number to be used as the upper threshold.
+    
+        Returns:
+        - labels: A one dimensional array of labels for each image value. 
         """
         labels = np.empty(arr.size)
         head = tail = 0
@@ -113,14 +175,14 @@ class Labeler():
                 labels[head:i] = np.full(i - head, np.NaN)
                 labels[tail:head] = np.zeros(head - tail)
                 tail = i
-                head = i  # + 1
+                head = i
                 bright = True
             elif val <= lower_thresh and not bright:
                 head = i + 1
             elif val <= lower_thresh and bright:
                 labels[head:i] = np.full(i - head, np.NaN)
                 labels[tail:head] = np.ones(head - tail)
-                head = i  # + 1
+                head = i
                 tail = i
                 bright = False
         if bright:
@@ -131,30 +193,46 @@ class Labeler():
         return labels
     
     def threshold_misfits(self, thresholds):
-        """ 
-        Inspects the thresholds, reporting if any thresholds are lower/higher than all brightness values
-        for that respective tweezer. Returns an n_tweezers x 2 array boolean array, where if the first
-        (second) entry is True then all brightness values are above (below) the respective threshold.
         """
-        labels = np.empty((self.n_tweezers, 2), dtype=bool)
+        Note if any tweezer's thresholds are so high (low) such that all that tweezer's image values lie below (above) that
+        threshold, leading to a lack of bright (dark) images for that tweezer.
+
+        Parameters:
+        - thresholds: an n_tweezers x 2 array, with the first axis corresponding to the tweezer number and the second corresponding
+                    to the threshold; lower threshold first and upper threshold second.
+    
+        Returns:
+        - all_below_upper: a list containing the indices for which all image values are below the upper threshold.
+        - all_above_lower: a list containing the indices for which all image values are above the lower threshold.
+        """
+        all_below_upper = []
+        all_above_lower = []
         for i, thresh in enumerate(thresholds):
-            all_below_upper = False
-            all_above_lower = False
             if np.all(thresh[0] < self.img_vals):
-                all_above_lower = True
+                all_above_lower.append(i)
                 log.warning(f"All brightness values for tweezer {i} are above the lower threshold!\nNo images for this tweezer can be labeled dark!")
             if np.all(thresh[1] > self.img_vals):
-                all_below_upper = True
+                all_below_upper.append(i)
                 log.warning(f"All brightness values for tweezer {i} are below the upper threshold!\nNo images for this tweezer can be labeled bright!")
-            labels[i] = np.array([all_above_lower, all_below_upper])
-        return labels
+        return all_below_upper, all_above_lower
+    
 
 
-    def threshold_plot(self, tweezer_num, labels):
+    def threshold_plot(self, tweezer_num, show_unknowns=False):
+        """
+        Create a plot for an individual tweezer displaying its brightness values color coded according to their label. Also plotted
+        are thresholds and loop number dividers. 
+
+        Parameters:
+        - tweezer_num: an integer indicating which tweezer's image values to plot.
+    
+        Returns:
+        - fig: a matplotlib figure displaying the color coded image values, thresholds, and loop dividers.  
+        """
         thresholds = self.info["Thresholds"]
 
         tweezer_vals = self.img_vals[tweezer_num]
-        tweezer_labels = labels[tweezer_num * self.per_loop * self.n_loops:(tweezer_num + 1)* self.per_loop * self.n_loops:]
+        tweezer_labels = self.labels[tweezer_num * self.per_loop * self.n_loops:(tweezer_num + 1)* self.per_loop * self.n_loops:]
 
         bright_mask = tweezer_labels == 1
         dark_mask = tweezer_labels == 0
@@ -175,11 +253,16 @@ class Labeler():
         fig = plt.figure(figsize=(20, 10))
         plt.plot(bright_indices, bright_vals, '.', label='bright')
         plt.plot(dark_indices, dark_vals, '.', label='dark')
-        plt.plot(unknown_indices, unknown_vals, 'o', label='?')
+        if show_unknowns:
+            plt.plot(unknown_indices, unknown_vals, 'o', label='?')
         plt.axhline(thresholds[tweezer_num, 1], color='r', linestyle='--', label=f"Upper Threshold = {thresholds[tweezer_num, 1]:.3f}")
         plt.axhline(thresholds[tweezer_num, 0], color='g', linestyle='--', label=f"Lower Threshold = {thresholds[tweezer_num, 0]:.3f}")
         plt.legend(loc='upper right')
         plt.title(f"Tweezer Number = {tweezer_num}")
         for i in range(self.n_loops):
             plt.axvline(i * self.per_loop, color='k', linestyle='--', label="Loop Separation")
-        return fig
+        return fig 
+    
+def gaussian_kernel(k_size, std):
+    kernel = cv2.getGaussianKernel(k_size, std)
+    return np.matmul(kernel, kernel.T)

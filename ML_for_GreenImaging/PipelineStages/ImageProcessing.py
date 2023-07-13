@@ -10,7 +10,6 @@ class ImageProcessor():
     """
         A class used for many image manipulation and tweezer array geometry reconstruction tasks.
 
-
     Attributes:
     - stack: brightness values for each image stored in a numpy array.
     - n_tweezers: the number of tweezers in the stack images.
@@ -18,6 +17,8 @@ class ImageProcessor():
     - per_loop: the number of images in each loop of the stack.
     - img_height: the height of a stack image in pixels.
     - img_width: the width of a stack image in pixels.
+    - info: the relevant information gathered when executing this pipeline stage as a
+            dictionary.
     """
 
     def __init__(self, stack, n_tweezers, n_loops):
@@ -28,7 +29,22 @@ class ImageProcessor():
         self.img_height, self.img_width = stack.shape[1], stack.shape[2]
         self.info = None
 
-    def run(self):
+    def run(self):        
+        """
+        Execute the necessary methods of this class to obtain information for the next pipeline stage.
+
+        Returns:
+        - crops3x3: an n_tweezers x (n_loops * per_loop) numpy array of image crops with 
+                    of square image crops centered at each tweezer, with side lengths of 
+                    three nearest neighbor distance.
+        - crops1x1: an n_tweezers x (n_loops * per_loop) numpy array of image crops with 
+            of square image crops centered at each tweezer, with side lengths of 
+            one nearest neighbor distance.
+        - positions: An self.n_tweezers x 2 array, where the ith entry corresponds to the coordinates of 
+          the ith tweezer.
+        - info: a dictionary containing a plot of the tweezer positions, as well as an array
+                of the tweezer positions themselves.
+        """
         positions = self.find_centroids()
         log.info(f"Found {positions.shape[0]} positions")
         nn_dist = self.find_nn_dist(positions)
@@ -63,7 +79,7 @@ class ImageProcessor():
         """
         centroids = self.find_centroids()
         nn_dist = self.find_nn_dist(centroids)
-        crops1x1 = self.crop_tweezer(1, nn_dist, centroids)
+        crops1x1 = self.crop_tweezer(1.5, nn_dist, centroids)
         positions = np.empty((self.n_tweezers, 2))
         weights = [] # need to get the size right; find lower right (maybe left?) corner correctly
         for i, tweezer in enumerate(crops1x1):
@@ -76,7 +92,6 @@ class ImageProcessor():
         return positions
 
     def find_centroids(self):
-
         """
         Attempt to find the locations of tweezers in an image using image processing methods
         and connected component analysis. You can find a more detailed description of the 
@@ -314,7 +329,6 @@ class ImageProcessor():
         tile_numbers = tile_indices[:, 1] * num_tiles_x + tile_indices[:, 0]
         sorted_indices = np.argsort(tile_numbers)
         sorted_vectors = positions[sorted_indices]
-
         return sorted_vectors
         
     
