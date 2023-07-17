@@ -29,32 +29,6 @@ class Labeler():
         self.img_vals = self.find_img_vals(crops)
         self.labels = None
         self.info = None
-
-        print(self.img_vals.shape)
-
-    def run(self):
-        """
-        Execute the necessary methods of this class to output information for
-        the next pipeline stage.
-
-        Returns:
-        - labels: A one dimensional array of labels for each image value. 
-         - info: a dictionary containing a plot of the thresholding fits for each tweezer, the thresholds,
-                the tweezer number of any misfit thresholds, and the R^2 values for bimodal Gaussian fits to image values
-                for each tweezer. 
-        """
-        fits, r_sq = self.bright_dark_fit()
-        thresholds, plots = self.find_thresholds(fits)
-        all_below_upper, all_above_lower = self.threshold_misfits(thresholds)
-        self.labels = self.make_labels(thresholds)
-        self.info = {"Histogram fits plot": plots,
-                "Thresholds": thresholds,
-                "Tweezers missing dark labels": all_above_lower,
-                "Tweezers missing bright labels": all_below_upper,
-                "R^2 Values": r_sq,
-                "Image Value Distribution Fits": fits
-                }
-        return self.labels, self.info
     
     def bright_dark_fit(self):
         """
@@ -246,9 +220,6 @@ class Labeler():
 
         unknown_indices = np.where(unknown_mask)[0]
         unknown_vals = tweezer_vals[unknown_mask]
-
-        print(unknown_mask)
-        print(dark_vals.shape)
 
         fig = plt.figure(figsize=(20, 10))
         plt.plot(bright_indices, bright_vals, '.', label='bright')

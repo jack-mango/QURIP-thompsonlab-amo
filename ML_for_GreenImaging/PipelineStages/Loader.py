@@ -28,44 +28,26 @@ class Loader():
         self.data_path = data_path
         self.model_path = model_path
 
-    def run(self):
-        """
-        Execute this class's methods to return information used later in the pipeline.
-        
-        Returns:
-        - stack: brightness values for each image stored in a numpy array.
-        - tot_loops: the total number of loops across all data files. For example
-                     if there are 20 loops in each file and four files, then the tot_loops
-                     is 80. 
-        - model: an instance of a tensorflow.keras sequential neural network.
-        """
-        stack, n_files = self.load_data()
-        log.info(f"Found {n_files} data files in {self.data_path}")
-        tot_loops = self.n_loops * n_files
-        model = self.load_model()
-        if not self.model_path is None:
-            log.info(f"Found model at {self.model_path}")
-        return stack, tot_loops, model
-
     def load_data(self):
         """
         Load .mat files from self.data_path if that directory exists.
 
         Returns:
-        - stack: brightness values for each image stored in a numpy array.
-                 The last two axes of this array hold the row and column pixel
-                 values for each image.
+        - stack: brightness values for each image stored in a numpy array. The first axis
+                corresponds ot file number and the second image number within the file.
+                The last two axes of this array hold the row and column pixel values for 
+                each image.
         - n_files: the number of .mat files found at self.data_path
         """
         n_files = 0
         if os.path.isdir(self.data_path):
             stack = []
-            for i, file in enumerate(os.listdir(self.data_path)):
+            for file in os.listdir(self.data_path):
                 if file.endswith('.mat'):
                     data = loadmat(self.data_path + '/' + file)
                     stack.append(data['stack'])     
                     n_files += 1
-            stack = np.concatenate(stack)
+            stack = np.concatenate(stack, axis=0)
         else:
             stack = loadmat(self.data_path)['stack']
             n_files += 1  

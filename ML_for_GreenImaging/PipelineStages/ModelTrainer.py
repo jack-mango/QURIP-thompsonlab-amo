@@ -9,6 +9,7 @@ log = logging.getLogger(__name__)
 class ModelTrainer():
 
     """
+    DEPRECATED
     Contains the methods used in the model training stage of the pipeline. 
 
     Attributes:
@@ -29,7 +30,7 @@ class ModelTrainer():
     """
 
     def __init__(self, model, training, testing, fidelity_crops, n_tweezers, n_loops,
-                  learning_rate=1e-4, epochs=8, validation_split=0.25):
+                  learning_rate=1e-4, epochs=8):
         self.model = model
         self.training_crops, self.training_labels = training[:2]
         self.testing_crops, self.testing_labels = testing[:2]
@@ -38,7 +39,7 @@ class ModelTrainer():
         self.n_loops = n_loops
         self.learning_rate = learning_rate
         self.epochs = epochs
-        self.validation_split = validation_split
+        self.validation_split = self.testing_crops.shape[0] / self.training_crops.shape[0]
 
     def run(self):
         """

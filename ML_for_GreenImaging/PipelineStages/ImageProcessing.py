@@ -21,39 +21,14 @@ class ImageProcessor():
             dictionary.
     """
 
-    def __init__(self, stack, n_tweezers, n_loops):
+    def __init__(self, stack, n_tweezers, n_loops, tweezer_positions=None):
         self.stack = stack
         self.n_tweezers = n_tweezers
         self.n_loops = n_loops
         self.per_loop = self.stack.shape[0] // n_loops
-        self.img_height, self.img_width = stack.shape[1], stack.shape[2]
-        self.info = None
-
-    def run(self):        
-        """
-        Execute the necessary methods of this class to obtain information for the next pipeline stage.
-
-        Returns:
-        - crops3x3: an n_tweezers x (n_loops * per_loop) numpy array of image crops with 
-                    of square image crops centered at each tweezer, with side lengths of 
-                    three nearest neighbor distance.
-        - crops1x1: an n_tweezers x (n_loops * per_loop) numpy array of image crops with 
-            of square image crops centered at each tweezer, with side lengths of 
-            one nearest neighbor distance.
-        - positions: An self.n_tweezers x 2 array, where the ith entry corresponds to the coordinates of 
-          the ith tweezer.
-        - info: a dictionary containing a plot of the tweezer positions, as well as an array
-                of the tweezer positions themselves.
-        """
-        positions = self.find_centroids()
-        log.info(f"Found {positions.shape[0]} positions")
-        nn_dist = self.find_nn_dist(positions)
-        log.info(f"Found nearest neighbor distance to be {nn_dist:.3}")
-        positions = self.position_tile_sort(positions, nn_dist)
-        crops_3x3 = self.crop_tweezer(3, nn_dist, positions)
-        crops_1x1 = self.crop_tweezer(1, nn_dist, positions)
-        self.info = {"Positions plot": self.plot(positions), "Positions": positions}
-        return crops_3x3, crops_1x1, positions, self.info
+        self.img_height, self.img_width = stack.shape[-2], stack.shape[-1]
+        self.positions = tweezer_positions
+        self.info = {}
 
     def pixel(self, x):
         """
@@ -69,27 +44,10 @@ class ImageProcessor():
     
     def find_tweezer_positions(self):
         """
-        Try to find the positions of the self.n_tweezers in the stack. The tweezer positions are
-        the same for each image throughout the stack. You can find a more detailed description of the 
-        algorithm used in the documentation.
-
-        Returns:
-        - positions: An self.n_tweezers x 2 array, where the ith entry corresponds to the coordinates of 
-          the ith tweezer.
+        FIXME
         """
-        centroids = self.find_centroids()
-        nn_dist = self.find_nn_dist(centroids)
-        crops1x1 = self.crop_tweezer(1.5, nn_dist, centroids)
-        positions = np.empty((self.n_tweezers, 2))
-        weights = [] # need to get the size right; find lower right (maybe left?) corner correctly
-        for i, tweezer in enumerate(crops1x1):
-            first_per_loop = np.concatenate([tweezer[i:i + self.per_loop // 2] for i in range(0, self.n_loops, self.per_loop)])
-            if i == 24:
-                plt.imshow(np.mean(first_per_loop, axis=0))
-            position, tweezer_weights = self.fit_gaussian_to_image(np.mean(tweezer, axis=0))
-            positions[i] = position + centroids[i] - np.full(2, self.pixel(nn_dist / 2))
-            weights.append(tweezer_weights)
-        return positions
+        self.positions = self.find_centroids()
+        return self.positions
 
     def find_centroids(self):
         """
@@ -102,10 +60,10 @@ class ImageProcessor():
         entry corresponds to the coordinates of the ith tweezer.
         """
         frac_stack = self.fractional_stack(8)
+        frac_stack = self.to_uint8_img(frac_stack)
         final = np.zeros(frac_stack.shape[1:], dtype='uint8')
         for img in frac_stack:
-            img = np.copy(img).astype('uint8')
-            img = cv2.GaussianBlur(img, (3, 3), 0)
+            img = cv2.bilateralFilter(img, 5, 25, 5)
             model = AutoGauss.GaussianMixture(img.flatten())
             params, r_sq = model.fit()
             dark_params, bright_params = params
@@ -124,10 +82,31 @@ class ImageProcessor():
             final)
         centroids = centroids[np.argsort(stats[:, -1])]
         return centroids[-2:-self.n_tweezers - 2:-1, ::-1]
+    
+    def to_uint8_img(self, img):
+        """
+        Converts an image to the uint8 data type.
+
+        Parameters:
+            - img (numpy.ndarray): The input image to be converted.
+
+        Returns:
+            - numpy.ndarray: The converted image of uint8 data type.
+
+        The function normalizes the input image by subtracting the minimum value and dividing by the range
+        (maximum value minus minimum value). This ensures that the image values are scaled to the range [0, 1].
+        Finally, the image is cast to the uint8 data type, where values are rounded and clipped to the range [0, 255].
+        The resulting image has values of type uint8, suitable for image display or saving.
+
+        Note that the input image is expected to be a numpy ndarray.
+        """
+        img = 255 * (img - img.min()) / (img.max() - img.min())
+        return img.astype('uint8')
 
     def fractional_stack(self, n):
         """
-        Separate the first 1/n images from the start of every loop.
+        Separate the first 1/n images from the start of every loop, rounding up to the largest
+        integer number of images
 
         Parameters:
         - n: the denomenator used in calculating what fraction of the stack
@@ -137,13 +116,13 @@ class ImageProcessor():
         - slices: the first 1/n images from each loop in the stack. 
         """
         slices = np.empty((self.n_loops, self.img_width, self.img_height))
+        slice_size = np.ceil(self.per_loop / n).astype(int)
         for i in range(self.n_loops):
-            slice_size = self.per_loop // n
             slices[i] = np.mean(
                 self.stack[i * self.per_loop: i * self.per_loop + slice_size], axis=0)
         return slices
 
-    def find_nn_dist(self, positions):
+    def find_nn_dist(self):
         """
         Find the "nearest neighbor distance" given a list of coordinates. In this case this
         is taken as the larger of the two differences in x and y coordinates of the two closest points. 
@@ -156,7 +135,7 @@ class ImageProcessor():
         Returns:
         - nn_dist: the nearest neighbor distance based on the above criterion;
         """
-        min_dist, closest_pair = self.closest_pair_distance(positions)
+        min_dist, closest_pair = self.closest_pair_distance(self.positions)
         return np.max(np.absolute(np.diff(closest_pair, axis=0)))
 
     def closest_pair_bf(self, points):
@@ -251,7 +230,7 @@ class ImageProcessor():
         return self.stack[:, self.pixel(x - h_border): self.pixel(x + h_border) + 1,
                           self.pixel(y - v_border): self.pixel(y + v_border) + 1]
 
-    def crop_tweezer(self, side_length, separation, centers):
+    def crop_tweezers(self, side_length, separation):
         """
         Create square crops for every tweezer in the stack, with each having a side length of 
         n x separation centered at each entry of centers
@@ -261,7 +240,6 @@ class ImageProcessor():
                         if the tweezers are in a rectangular lattice, then each crop would contain at most
                         side_length x side_length tweezers
         - separation: number of pixels per side_length unit
-        - centers: an m x 2 array of (x, y) coordinates that specify where crops are taken from
 
         Returns:
         - crops: an array of every crop of every tweezer. Consecutive crops in this array correspond to those 
@@ -269,16 +247,13 @@ class ImageProcessor():
         """
         h_border = v_border = self.pixel(side_length * separation / 2)
         crops = []
-        for center in centers:
-            crops.append(self.crop(*center, h_border, v_border))
+        for pos in self.positions:
+            crops.append(self.crop(*pos, h_border, v_border))
         return np.array(crops)
 
-    def plot(self, positions):
+    def plot(self):
         """
         Plot the given position coordinates on top of stack averaged over all images.
-
-        Parameters:
-        - positions: an m x 2 array containing the coordinates (usually) of the tweezers.
 
         Returns:
         - fig: a matplotlib figure of the plot generated by this function
@@ -286,7 +261,7 @@ class ImageProcessor():
         fig = plt.figure()
         img = self.stack.mean(axis=0)
         img = plt.imshow(img.T, cmap='viridis')
-        plt.plot(*positions.T, 'r.')
+        plt.plot(*self.positions.T, 'ro', fillstyle='none')
         plt.colorbar()
         plt.title("Tweezer Positions")
         return fig
@@ -309,7 +284,7 @@ class ImageProcessor():
         weights = model.func(model.make_coordinates(), 1, *params, 0)
         return np.array(params[:2]), weights
     
-    def position_tile_sort(self, positions, tile_size):
+    def position_tile_sort(self, tile_size):
         """
         Sort an array of position vectors based on which square tile they fall into, if all the vectors
         are contained within a rectangular region. Vectors in tiles closer to the origin are put in front of 
@@ -324,11 +299,11 @@ class ImageProcessor():
                           two vectors fall in the same tile, then the order is ambiguous.
         """
         num_tiles_x = self.img_width // tile_size
-        num_tiles_y = self.img_height // tile_size
-        tile_indices = np.floor(positions / tile_size).astype(int)
+        tile_indices = np.floor(self.positions / tile_size).astype(int)
         tile_numbers = tile_indices[:, 1] * num_tiles_x + tile_indices[:, 0]
         sorted_indices = np.argsort(tile_numbers)
-        sorted_vectors = positions[sorted_indices]
+        sorted_vectors = self.positions[sorted_indices]
+        self.positions = sorted_vectors
         return sorted_vectors
         
     

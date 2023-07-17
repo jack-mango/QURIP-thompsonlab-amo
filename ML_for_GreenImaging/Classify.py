@@ -2,20 +2,6 @@ from PipelineStages import *
 import argparse
 import numpy as np
 from tensorflow.keras import models
-
-parser = argparse.ArgumentParser(
-    prog="GreenModelTraining",
-    description="This program trains a neural network to classify fluoresence images"
-)
-
-parser.add_argument('n_loops', type=int,
-                    help="Enter the number of loops in a dataset")
-parser.add_argument('n_tweezers', type=int,
-                    help="Enter the number of tweezers in an image")
-parser.add_argument('data_dir', type=str,
-                    help="Specify the relative path of the data location")
-parser.add_argument('model_dir', type=str,
-                    help="Specify the relative path of where the model is located")
                     
 if __name__ == "__main__":
     info = {}
@@ -35,3 +21,13 @@ if __name__ == "__main__":
 
     # Save positions and occupancies
     np.savez_compressed(args.data_dir, occupancies = occ)
+
+def load(n_loops, n_tweezers, data_dir, model_dir):
+    return
+
+def crop_tweezers(positions, separation):
+    processor
+    return
+
+def classify():
+    return
